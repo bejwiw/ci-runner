@@ -59,5 +59,12 @@ jobs:
           PRE_WAKE_SECONDS: "21300"
           CURRENT_SHA: ${{ github.sha }}
         run: |
-          python3 -c "import app; print('IMPORT OK')" 2>&1 || echo "IMPORT FAILED"
+          python3 -c "
+          from manager.app import app
+          with app.test_client() as c:
+              r = c.get('/api/health')
+              print(f'Status: {r.status_code}')
+              print(f'Body: {r.data.decode()[:500]}')
+          " 2>&1
+          echo "--- starting manager ---"
           python3 app.py
