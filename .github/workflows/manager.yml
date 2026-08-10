@@ -58,4 +58,6 @@ jobs:
           WORKER_WORKFLOW: worker.yml
           PRE_WAKE_SECONDS: "21300"
           CURRENT_SHA: ${{ github.sha }}
-        run: python3 app.py
+        run: |
+          python3 -c "import app; print('IMPORT OK')" 2>&1 || echo "IMPORT FAILED"
+          python3 app.py
