@@ -380,7 +380,7 @@ class _S3Client:
             aws_access_key_id=self._access_key,
             aws_secret_access_key=self._secret_key,
             config=Config(
-                retries={"max_retries": 0},
+                retries={"max_attempts": 0},
                 connect_timeout=10,
                 read_timeout=60,
                 max_pool_connections=5,
