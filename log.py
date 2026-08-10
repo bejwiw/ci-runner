@@ -112,7 +112,7 @@ def get_logs(limit=500, level=None, module=None, keyword=None):
 
 
 def get_stats():
-    with stats_lock:
+    with _stats_lock:
         return dict(_stats)
 
 
@@ -146,7 +146,7 @@ def request_logger(app):
                 (request.method, request.path, response.status_code, dur, ip))
         except _queue.Full:
             pass
-        with stats_lock:
+        with _stats_lock:
             _stats["request"] += 1
         return response
     return app
