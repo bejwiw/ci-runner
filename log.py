@@ -48,7 +48,7 @@ class RingBufferHandler(logging.Handler):
                 _ring.append(entry)
                 if len(_ring) > MAX_RING_LINES:
                     del _ring[:len(_ring) - MAX_RING_LINES]
-            with stats_lock:
+            with _stats_lock:
                 if record.levelno >= logging.ERROR:
                     _stats["error"] += 1
                 elif record.levelno >= logging.WARNING:
