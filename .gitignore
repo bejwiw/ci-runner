@@ -1,0 +1,18 @@
+# 文档不上传（本地保存）
+docs/
+# 敏感文件
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.bak
+*.backup.*
+s3-accounts*.txt
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+# 系统
+.DS_Store

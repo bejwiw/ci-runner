@@ -1,0 +1,225 @@
+# -*- coding: utf-8 -*-
+"""
+Manager Flask App + 认证 + 基础路由 + 启动入口
+"""
+import os
+import time
+import json
+import functools
+import threading
+import subprocess
+
+from flask import Flask, request, jsonify
+
+import config
+import log
+from core import lock as core_lock
+from core import status as core_status
+from core import ghapi
+from core.s3 import S3Pool
+from manager import state, store, accounts, tasks, monitor
+from manager.api_instances import bp as api_bp
+from manager.background import start_background
+
+app = Flask(__name__)
+app.config["SECRET_KEY"] = os.urandom(24).hex()
+logger = log.setup_logger("manager")
+
+
+# ==================== 认证 ====================
+def _token():
+    t = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if not t:
+        t = (request.args.get("token") or "").strip()
+    if not t:
+        d = request.get_json(silent=True) or {}
+        t = (d.get("token") or "").strip()
+    return t
+
+
+def _authed():
+    return bool(config.EXEC_TOKEN) and _token() == config.EXEC_TOKEN
+
+
+def require_auth(f):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        if not _authed():
+            return jsonify(ok=False, error="未授权"), 401
+        return f(*args, **kwargs)
+    return wrapper
+
+
+# ==================== 基础路由 ====================
+@app.route("/api/health")
+def health():
+    return jsonify(ok=True, role="manager", job=core_lock.JOB_ID,
+                   elapsed=core_status.elapsed(),
+                   leader=state.leader.is_leader if state.leader else False)
+
+
+@app.route("/api/status")
+@require_auth
+def status():
+    accts = accounts.list_accounts()
+    insts = store.list_instances()
+    now = time.time()
+    healthy = sum(1 for hb in state.worker_heartbeats.values()
+                  if now - hb.get("last_seen", 0) < 180)
+    return jsonify(ok=True, role="manager", job=core_lock.JOB_ID,
+                   elapsed=core_status.elapsed(),
+                   leader=state.leader.is_leader if state.leader else False,
+                   accounts=accts, instances=insts,
+                   worker_health={"online": healthy, "total": len(insts)})
+
+
+@app.route("/api/overview")
+@require_auth
+def overview():
+    accts = accounts.list_accounts()
+    insts = store.list_instances()
+    now = time.time()
+    healthy = sum(1 for hb in state.worker_heartbeats.values()
+                  if now - hb.get("last_seen", 0) < 180)
+    quota = {}
+    for acc in accounts.load_accounts():
+        h, detail = ghapi.estimate_account_quota(acc)
+        quota[acc["name"]] = {"health": round(h, 2), "detail": detail}
+    all_tasks = tasks.load_tasks()
+    task_stats = {}
+    for t in all_tasks:
+        s = t.get("status", "unknown")
+        task_stats[s] = task_stats.get(s, 0) + 1
+    s3_info = state.s3pool.get_status() if state.s3pool else {"ready": False}
+    return jsonify(ok=True, role="manager", job=core_lock.JOB_ID,
+                   elapsed=core_status.elapsed(),
+                   leader=state.leader.is_leader if state.leader else False,
+                   accounts=accts, instances=insts,
+                   worker_health={"online": healthy, "total": len(insts)},
+                   quota=quota, tasks=task_stats, s3=s3_info)
+
+
+@app.route("/api/logs")
+@require_auth
+def logs():
+    limit = max(10, min(int(request.args.get("limit", 300)), 2000))
+    return jsonify(ok=True, logs=log.get_logs(
+        limit=limit, level=request.args.get("level"),
+        module=request.args.get("module"), keyword=request.args.get("keyword")),
+        stats=log.get_stats())
+
+
+@app.route("/api/s3/status")
+@require_auth
+def s3_status():
+    if state.s3pool:
+        return jsonify(ok=True, **state.s3pool.get_status())
+    return jsonify(ok=False, error="S3 未初始化"), 503
+
+
+# ==================== Worker 心跳 ====================
+@app.route("/api/worker/heartbeat", methods=["POST"])
+def worker_heartbeat():
+    if not _authed():
+        return jsonify(ok=False, error="未授权"), 401
+    d = request.get_json(silent=True) or {}
+    inst_id = d.get("inst_id", "")
+    if inst_id:
+        state.worker_heartbeats[inst_id] = {
+            "job_id": d.get("job_id", ""),
+            "last_seen": time.time(),
+            "version": d.get("version", "unknown"),
+        }
+    return jsonify(ok=True)
+
+
+@app.route("/api/worker/leader")
+def worker_leader():
+    if not _authed():
+        return jsonify(ok=False, error="未授权"), 401
+    inst_id = request.args.get("inst_id", "")
+    job_id = request.args.get("job_id", "")
+    hb = state.worker_heartbeats.get(inst_id)
+    is_ldr = bool(hb and hb.get("job_id") == job_id)
+    return jsonify(ok=True, is_leader=is_ldr, current=hb)
+
+
+# ==================== 启动入口 ====================
+def run():
+    state.leader = core_lock.LeaderLock(backend="release")
+    state.leader.acquire()
+    if state.leader.is_leader:
+        threading.Thread(target=state.leader.heartbeat_loop, daemon=True).start()
+        monitor.start_monitors()
+        tasks.recover_pending()
+        tasks.start_worker()
+        start_background()
+        logger.info("[boot] Leader 模式，所有服务已启动")
+    else:
+        def _on_promote():
+            monitor.start_monitors()
+            tasks.recover_pending()
+            tasks.start_worker()
+            start_background()
+            logger.info("[boot] Follower 升级为 Leader")
+        threading.Thread(target=state.leader.follower_loop,
+                         args=(_on_promote,), daemon=True).start()
+
+    # S3 初始化
+    bootstrap = os.environ.get("S3_BOOTSTRAP", "")
+    if bootstrap:
+        state.s3pool = S3Pool(bootstrap, config.S3_ENDPOINT, config.S3_REGION)
+        if state.s3pool.init():
+            store.set_s3pool(state.s3pool)
+            logger.info("[boot] S3 池初始化成功")
+        else:
+            logger.error("[boot] S3 池初始化失败，降级 Releases")
+    else:
+        logger.warning("[boot] 无 S3_BOOTSTRAP，仅用 Releases")
+
+    # 预触发续命
+    threading.Thread(target=_pre_wake, daemon=True).start()
+    # 自动更新
+    threading.Thread(target=_auto_update, daemon=True).start()
+
+    log.request_logger(app)
+    app.register_blueprint(api_bp)
+    from werkzeug.serving import run_simple
+    run_simple("0.0.0.0", config.PORT, app, threaded=True, use_reloader=False)
+
+
+def _pre_wake():
+    import time as _t
+    done = False
+    while True:
+        if core_status.elapsed() >= config.PRE_WAKE_SECONDS and not done:
+            done = True
+            try:
+                url = f"{ghapi.API_BASE}/repos/{config.REPO}/actions/workflows/{config.MANAGER_WORKFLOW}/dispatches"
+                ghapi.gh_request("POST", url, data={"ref": "main"})
+                logger.info(f"[prewake] 已预触发 ({core_status.elapsed()}s)")
+            except Exception as e:
+                logger.error(f"[prewake] 失败: {e}")
+            break
+        _t.sleep(60)
+
+
+def _auto_update():
+    import time as _t
+    sha = config.CURRENT_SHA
+    if not sha:
+        return
+    while True:
+        _t.sleep(600)
+        try:
+            url = f"{ghapi.API_BASE}/repos/{config.MAIN_REPO}/commits/main"
+            _, d = ghapi.gh_request("GET", url)
+            latest = d.get("sha", "")
+            if latest and latest != sha:
+                logger.info(f"[update] 新版本 {latest[:10]}，重启")
+                url2 = f"{ghapi.API_BASE}/repos/{config.REPO}/actions/workflows/{config.MANAGER_WORKFLOW}/dispatches"
+                ghapi.gh_request("POST", url2, data={"ref": "main"})
+                _t.sleep(60)
+                os._exit(0)
+        except Exception as e:
+            logger.error(f"[update] 检查失败: {e}")

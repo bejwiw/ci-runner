@@ -1,0 +1,14 @@
+{
+  "type": "module",
+  "name": "ghbox-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP service for ghbox cloud instances",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "express": "^4.21.0",
+    "zod": "^3.24.0",
+    "ws": "^8.18.0",
+    "node-pty": "^1.0.0",
+    "playwright": "^1.49.0"
+  }
+}

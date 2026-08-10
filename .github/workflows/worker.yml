@@ -1,0 +1,59 @@
+name: worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      INSTANCE_ID:
+        description: '实例 ID'
+        required: true
+        type: string
+
+concurrency:
+  group: worker-${{ github.event.inputs.INSTANCE_ID }}
+  cancel-in-progress: true
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Install cloudflared
+        run: |
+          curl -sL -o /tmp/cf.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i /tmp/cf.deb || sudo apt-get install -y -f
+
+      - name: Run worker
+        env:
+          INSTANCE_ROLE: worker
+          INSTANCE_ID: ${{ github.event.inputs.INSTANCE_ID }}
+          REPO: ${{ github.repository }}
+          MAIN_REPO: ${{ vars.MAIN_REPO || 'qqztceghrgji/ci-runner' }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          EXEC_TOKEN: ${{ secrets.EXEC_TOKEN }}
+          DEMO_KEY: ${{ secrets.DEMO_KEY }}
+          S3_BOOTSTRAP: ${{ secrets.S3_BOOTSTRAP }}
+          S3_ENDPOINT: ${{ vars.S3_ENDPOINT || 'https://t3.storage.dev' }}
+          S3_REGION: ${{ vars.S3_REGION || 'us-west-2' }}
+          MANAGER_HOST: ${{ vars.MANAGER_HOST || 'ghvps2.kekeke.cc.cd' }}
+          PRE_WAKE_SECONDS: "21300"
+          WORKER_WORKFLOW: worker.yml
+          CURRENT_SHA: ${{ github.sha }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN || 'kekeke.cc.cd' }}
+        run: python3 app.py
