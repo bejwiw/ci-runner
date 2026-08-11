@@ -196,7 +196,6 @@ def run():
     # 自动更新
     threading.Thread(target=_auto_update, daemon=True).start()
 
-    app.config["PROPAGATE_EXCEPTIONS"] = True
     log.request_logger(app)
     app.register_blueprint(api_bp)
     from werkzeug.serving import run_simple
