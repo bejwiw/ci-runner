@@ -39,7 +39,7 @@ def _cf_request(method, url, data=None, timeout=30):
         return 0, str(e)
 
 
-def create_tunnel(hostname, service_url="http://localhost:8080"):
+def create_tunnel(hostname, service_url="http://127.0.0.1:8080"):
     """创建隧道，返回 (tunnel_id, tunnel_token)"""
     name = "t-" + hostname.split(".")[0]
     # 1. 创建隧道（409 时用唯一名称重试）
