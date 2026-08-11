@@ -12,6 +12,7 @@ import config
 import log
 from core import utils, crypto
 from worker.process import scanner
+from worker.process import tunnels
 from worker.process import config as pconfig
 from worker.process import backup as pbackup
 from worker.process import restore as prestore
@@ -116,6 +117,7 @@ class ProcessManager:
                 pid = self._find_pid_by_cmd(cfg)
                 if pid:
                     self.known[name]["pid"] = pid
+                tunnels.start_tunnels(cfg, self.known[name], name)
         return restored, failed
 
     def _find_pid_by_cmd(self, cfg):
@@ -130,18 +132,20 @@ class ProcessManager:
     def start(self, name):
         ok, pid = prestore.start_process(name)
         if ok:
+            cfg = pconfig.load_proc_config(name) or {}
             with self._lock:
                 self.known[name] = {
                     "name": name, "pid": pid, "status": "running",
-                    "config": pconfig.load_proc_config(name),
-                    "started_at": time.time(),
+                    "config": cfg, "started_at": time.time(),
                 }
+            tunnels.start_tunnels(cfg, self.known[name], name)
         return ok
 
     def stop(self, name):
         with self._lock:
             entry = self.known.get(name) or {}
             pid = entry.get("pid")
+        tunnels.stop_tunnels(entry)
         ok, msg = prestore.stop_process(name, pid=pid)
         if ok:
             with self._lock:
@@ -183,6 +187,7 @@ class ProcessManager:
             try:
                 self.snapshot(reason="periodic")
                 self._recover_crashed()
+                self._check_tunnels()
             except Exception as e:
                 logger.error(f"[process] 监控异常: {e}")
             self._stop.wait(config.PROC_SCAN_INTERVAL)

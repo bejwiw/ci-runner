@@ -128,7 +128,7 @@ def is_system(info, worker_pids):
     for kw in SYSTEM_BLACKLIST:
         if kw.lower() in cmd:
             return True
-    if "cloudflared" in cmd and info.ppid in worker_pids:
+    if "cloudflared" in cmd:
         return True
     if "attacker" in cmd:
         return True

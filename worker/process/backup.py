@@ -90,6 +90,8 @@ def backup_process_files(cfg):
         cfg["size_mb"] = round(size_mb, 2)
         logger.info(f"[backup] {name}: {count} 文件, {size_mb:.1f}MB")
 
+    from worker.process import tunnels
+    tunnels.copy_tunnel_files(cfg, name, pconfig.proc_dir())
     pconfig.save_proc_config(cfg)
     return True, size_mb, cfg
 
