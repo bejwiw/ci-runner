@@ -11,7 +11,10 @@ import threading
 import config
 import log
 from core import utils, crypto
-from worker.process import scanner, pconfig, backup as pbackup, restore as prestore
+from worker.process import scanner
+from worker.process import config as pconfig
+from worker.process import backup as pbackup
+from worker.process import restore as prestore
 
 logger = log.setup_logger("process")
 
