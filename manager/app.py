@@ -144,7 +144,21 @@ def worker_leader():
     return jsonify(ok=True, is_leader=is_ldr, current=hb)
 
 
+
+# ==================== 任务处理器 ====================
+@tasks.register_handler("add_account")
+def _task_add_account(params, task):
+    logger.info(f"[task] 处理账号添加: {params.get('name')}")
+    res = accounts.auto_provision_account(
+        params.get("name"), params.get("token"),
+        repo=params.get("repo"), max_conc=params.get("max_concurrency"))
+    if not res.get("ok"):
+        raise RuntimeError(res.get("error", "未知错误"))
+    logger.info(f"[task] 账号 {params.get('name')} 配置完成")
+
+
 # ==================== 启动入口 ====================
+
 def run():
     state.leader = core_lock.LeaderLock(backend="release")
     state.leader.acquire()
