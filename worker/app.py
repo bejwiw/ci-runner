@@ -163,6 +163,8 @@ def backup_now():
         if state.proc_mgr:
             state.proc_mgr.snapshot(reason="manual_now")
         elapsed = time.time() - t0
+        if state.s3pool:
+            state.s3pool.save_state()
         logger.info(f"[backup-now] 完成 ({elapsed:.1f}s)")
         return jsonify(ok=True, db_size=db_size,
                        files_size=res[0] if res else 0, elapsed=round(elapsed, 1))
