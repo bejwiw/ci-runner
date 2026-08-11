@@ -10,6 +10,7 @@ ghbox 统一日志系统
 import os
 import time
 import datetime
+import logging
 
 def _bj_time():
     """北京时间"""
@@ -21,7 +22,6 @@ class _BJFormatter(logging.Formatter):
         return ct.strftime(datefmt or "%Y-%m-%d %H:%M:%S")
 
 import threading
-import logging
 import subprocess
 from logging.handlers import RotatingFileHandler
 
