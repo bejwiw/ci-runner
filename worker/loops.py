@@ -45,8 +45,6 @@ def _backup_loop():
             persistence.backup_files(state.inst_cfg)
             if state.proc_mgr:
                 state.proc_mgr.snapshot(reason="periodic")
-            if state.s3pool:
-                state.s3pool.save_state()
         except Exception as e:
             logger.error(f"[backup] 失败: {e}")
 

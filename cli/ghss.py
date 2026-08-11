@@ -112,6 +112,18 @@ def json_mode(args):
                 print(json_dumps(api.get_inst(i["hostname"], "/api/attack/status")))
                 return
         print(json_dumps({"ok": False, "error": "实例不存在"}))
+
+    elif op == "s3-health":
+        print(json_dumps(api.get("/api/s3/health")))
+    elif op == "s3-accounts":
+        print(json_dumps(api.get("/api/s3/accounts")))
+    elif op == "logs-proxy" and len(args) > 1:
+        print(json_dumps(api.get(f"/api/instances/{args[1]}/logs?limit=50")))
+    elif op == "processes-proxy" and len(args) > 1:
+        print(json_dumps(api.get(f"/api/instances/{args[1]}/processes")))
+    elif op == "resource-proxy" and len(args) > 1:
+        print(json_dumps(api.get(f"/api/instances/{args[1]}/resource")))
+
     else:
         print(json_dumps({"ok": False, "error": f"未知操作: {op}"}))
 

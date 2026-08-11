@@ -173,13 +173,14 @@ def backup_files(inst_cfg=None):
     data = backup_files_to_bytes()
     if not data:
         return None
-    # S3（不加密）
+    # S3（不加密，双写）
     if _s3pool and _s3pool.is_ready():
-        if _s3pool.put(files_key, data):
-            logger.info(f"[backup] 文件 → S3 ({len(data)} 字节)")
-            return len(data), 1
-    # Releases（upload_chunked内部自动加密）
+        _s3pool.put(files_key, data)
+        logger.info(f"[backup] 文件 → S3 ({len(data)} 字节)")
+    # Releases（upload_chunked内部自动加密，始终双写）
     size, parts = releases.upload_chunked(files_asset, data)
+    logger.info(f"[backup] 文件 → Releases ({size} 字节)")
+    return size, parts
     logger.info(f"[backup] 文件 → Releases ({size} 字节, {parts} 分片)")
     return size, parts
 

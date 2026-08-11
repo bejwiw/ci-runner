@@ -387,3 +387,77 @@ def attack_status():
             print(f"  统计: {stats}")
     else:
         print(f"  {d.get('error')}")
+
+
+# ==================== S3 增强 ====================
+
+def s3_health():
+    d = api.get("/api/s3/health")
+    if not d.get("ok"):
+        print(f"  {d.get('error')}")
+        return
+    print(f"  活跃: {d.get('active', 0)} | 降级: {d.get('degraded', 0)} | 不可用: {d.get('unavailable', 0)} | 总计: {d.get('total', 0)}")
+
+
+def s3_accounts():
+    d = api.get("/api/s3/accounts")
+    if not d.get("ok"):
+        print(f"  {d.get('error')}")
+        return
+    accts = d.get("accounts", [])
+    if not accts:
+        print(f"  全部正常（{d.get('total', 0)} 个账号全部 active）")
+        return
+    print(f"  非 active 账号（共 {d.get('total_non_active', 0)} 个，显示前 {len(accts)}）：")
+    print(f"  {'序号':<6}{'状态':<12}{'A类':<6}{'B类':<6}{'存储MB':<10}{'失败':<4}{'错误':<40}")
+    print("  " + "-" * 80)
+    for a in accts:
+        print(f"  {a['idx']:<6}{a['status']:<12}{a['a_count']:<6}{a['b_count']:<6}"
+              f"{a['used_mb']:<10}{a['fail_count']:<4}{a.get('last_error','')[:38]}")
+
+
+# ==================== 代理 API（通过 manager 查看 worker）===================
+
+def proxy_logs():
+    inst = pick_instance()
+    if not inst:
+        return
+    d = api.get(f"/api/instances/{inst['id']}/logs?limit=50")
+    if not d.get("ok"):
+        print(f"  {d.get('error')}")
+        return
+    import datetime
+    for entry in d.get("logs", []):
+        if isinstance(entry, dict):
+            ts = entry.get("time", 0)
+            bj = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone(datetime.timedelta(hours=8)))
+            print(f"  {bj.strftime('%H:%M:%S')} [{entry.get('level', '')}] {entry.get('msg', '')[:80]}")
+
+
+def proxy_processes():
+    inst = pick_instance()
+    if not inst:
+        return
+    d = api.get(f"/api/instances/{inst['id']}/processes")
+    if not d.get("ok"):
+        print(f"  {d.get('error')}")
+        return
+    procs = d.get("processes", [])
+    if not procs:
+        print("  暂无进程")
+        return
+    for p in procs:
+        print(f"  {p.get('name', ''):<20} pid={p.get('pid')} {'运行' if p.get('running') else '停止'}")
+
+
+def proxy_resource():
+    inst = pick_instance()
+    if not inst:
+        return
+    d = api.get(f"/api/instances/{inst['id']}/resource")
+    if not d.get("ok"):
+        print(f"  {d.get('error')}")
+        return
+    print(f"  内存: {d.get('mem_avail_kb', 0) // 1024}MB 可用 / {d.get('mem_total_kb', 0) // 1024}MB")
+    print(f"  磁盘: {d.get('disk_used_kb', 0) // 1024}MB / {d.get('disk_total_kb', 0) // 1024}MB ({d.get('disk_use_pct', 0)}%)")
+    print(f"  运行: {d.get('elapsed', 0)}s")

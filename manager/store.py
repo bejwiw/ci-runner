@@ -10,6 +10,7 @@
 存储：S3 账号0（主）+ GitHub Releases（降级）
 """
 import time
+import json as _json
 import threading
 import datetime
 
@@ -28,6 +29,25 @@ _cache = {}
 _cache_time = {}
 
 
+def _s3_put_json(key, obj):
+    """S3写入JSON到数据账号（一致性哈希分散）"""
+    if _s3pool and _s3pool.is_ready():
+        return _s3pool.put(key, _json.dumps(obj, ensure_ascii=False).encode())
+    return False
+
+
+def _s3_get_json(key):
+    """S3从数据账号读取JSON（一致性哈希查找）"""
+    if _s3pool and _s3pool.is_ready():
+        raw = _s3pool.get(key)
+        if raw is not None:
+            try:
+                return _json.loads(raw.decode())
+            except Exception:
+                return None
+    return None
+
+
 def set_s3pool(pool):
     """注入 S3Pool 实例"""
     global _s3pool
@@ -43,7 +63,7 @@ def load_instances():
         return _cache.get("instances", [])
 
     if _s3pool and _s3pool.is_ready():
-        data = _s3pool.get_meta_json("meta/instances.json", default=None)
+        data = _s3_get_json("meta/instances.json")
         if data is not None and isinstance(data, list):
             logger.info(f"[store] 从 S3 加载 {len(data)} 个实例")
             return data
@@ -72,7 +92,7 @@ def save_instances(instances):
         # merge：从 S3 读取最新数据，恢复缺失的实例
         try:
             if _s3pool and _s3pool.is_ready():
-                current = _s3pool.get_meta_json("meta/instances.json", default=None)
+                current = _s3_get_json("meta/instances.json")
                 if current and isinstance(current, list):
                     current_ids = {i.get("id") for i in instances}
                     for inst in current:
@@ -99,7 +119,7 @@ def save_instances(instances):
         s3_ok = False
         if _s3pool and _s3pool.is_ready():
             try:
-                s3_ok = _s3pool.put_meta_json("meta/instances.json", instances)
+                s3_ok = _s3_put_json("meta/instances.json", instances)
             except Exception as e:
                 logger.warning(f"[store] S3 保存失败: {e}")
             if s3_ok:
@@ -126,7 +146,7 @@ def save_instances(instances):
 # ==================== 账号配置 ====================
 def load_accounts():
     if _s3pool and _s3pool.is_ready():
-        data = _s3pool.get_meta_json("meta/accounts.json", default=None)
+        data = _s3_get_json("meta/accounts.json")
         if data is not None and isinstance(data, list):
             return data
     return releases.load_json_enc("accounts.json.enc", default=[])
@@ -138,7 +158,7 @@ def save_accounts(accounts):
         return False
     if _s3pool and _s3pool.is_ready():
         try:
-            _s3pool.put_meta_json("meta/accounts.json", accounts)
+            _s3_put_json("meta/accounts.json", accounts)
         except Exception as e:
             logger.warning(f"[store] S3 保存账号失败: {e}")
     releases.save_json_enc("accounts.json.enc", accounts)
@@ -151,7 +171,7 @@ def load_tasks():
     if "tasks" in _cache_time and now - _cache_time["tasks"] < 60:
         return _cache.get("tasks", [])
     if _s3pool and _s3pool.is_ready():
-        data = _s3pool.get_meta_json("meta/tasks.json", default=None)
+        data = _s3_get_json("meta/tasks.json")
         if data is not None and isinstance(data, list):
             return data
     result = releases.load_json_enc("tasks.json.enc", default=[])
@@ -163,7 +183,7 @@ def load_tasks():
 def save_tasks(tasks):
     if _s3pool and _s3pool.is_ready():
         try:
-            _s3pool.put_meta_json("meta/tasks.json", tasks)
+            _s3_put_json("meta/tasks.json", tasks)
         except Exception:
             pass
     releases.save_json_protected("tasks.json.enc", tasks)
@@ -178,7 +198,7 @@ def save_instance_config(inst_id, cfg):
     """保存实例配置到 S3 + Releases"""
     if _s3pool and _s3pool.is_ready():
         try:
-            _s3pool.put_meta_json(_inst_config_key(inst_id), cfg)
+            _s3_put_json(_inst_config_key(inst_id), cfg)
         except Exception as e:
             logger.warning(f"[store] S3 保存实例配置 {inst_id} 失败: {e}")
     try:
@@ -190,7 +210,7 @@ def save_instance_config(inst_id, cfg):
 def load_instance_config(inst_id):
     """读取实例配置。优先 S3，回退 Releases。"""
     if _s3pool and _s3pool.is_ready():
-        data = _s3pool.get_meta_json(_inst_config_key(inst_id), default=None)
+        data = _s3_get_json(_inst_config_key(inst_id))
         if data is not None:
             return data
     return releases.load_json_enc(f"inst-{inst_id}.json.enc", default={})

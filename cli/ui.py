@@ -19,7 +19,7 @@ def main_menu():
     print("  [6] 添加账号")
     print("  [7] 任务队列")
     print("  [8] 查看服务器日志")
-    print("  [9] S3 存储状态")
+    print("  [9] S3 存储（状态/健康/账号详情）")
     print("  [a] 实例管理（进程/备份/执行命令）")
     print("  [b] 攻击功能")
     print("  [o] 总览")
@@ -43,6 +43,9 @@ def instance_menu():
         print("  [7] 立即备份")
         print("  [8] 执行命令")
         print("  [9] 资源监控")
+        print("  [a] Worker日志（代理）")
+        print("  [b] Worker进程（代理）")
+        print("  [c] Worker资源（代理）")
         print("  [0] 返回主菜单")
         choice = _input("\n  请选择: ")
         if choice == "1":
@@ -63,6 +66,12 @@ def instance_menu():
             ops.exec_cmd()
         elif choice == "9":
             ops.resource_monitor()
+        elif choice in ("a", "A"):
+            ops.proxy_logs()
+        elif choice in ("b", "B"):
+            ops.proxy_processes()
+        elif choice in ("c", "C"):
+            ops.proxy_resource()
         elif choice == "0" or choice is None:
             break
         else:
@@ -120,7 +129,7 @@ def run_menu():
             elif choice == "8":
                 ops.view_logs()
             elif choice == "9":
-                ops.s3_status()
+                s3_menu()
             elif choice in ("a", "A"):
                 instance_menu()
             elif choice in ("b", "B"):
@@ -136,3 +145,27 @@ def run_menu():
             print("\n  返回菜单")
         except Exception as e:
             print(f"  错误: {e}")
+
+
+def s3_menu():
+    """S3 存储子菜单"""
+    from cli import ops
+    while True:
+        print("\n" + "-" * 40)
+        print("  S3 存储管理")
+        print("-" * 40)
+        print("  [1] 全局状态")
+        print("  [2] 健康摘要")
+        print("  [3] 账号详情（非active）")
+        print("  [0] 返回主菜单")
+        choice = _input("\n  请选择: ")
+        if choice == "1":
+            ops.s3_status()
+        elif choice == "2":
+            ops.s3_health()
+        elif choice == "3":
+            ops.s3_accounts()
+        elif choice == "0" or choice is None:
+            break
+        else:
+            print("  无效选择")
