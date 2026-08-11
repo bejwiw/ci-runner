@@ -75,6 +75,7 @@ def _find_asset(release, name):
 
 
 def upload_asset(name, data_bytes, token=None, repo=None):
+    name = name.replace("/", ".")  # GitHub asset name不能包含/
     """上传加密资产。返回 (size, status)。"""
     tok = token or config.GH_TOKEN
     repo = repo or config.REPO
@@ -98,6 +99,7 @@ def upload_asset(name, data_bytes, token=None, repo=None):
 
 
 def download_asset(name, token=None, repo=None):
+    name = name.replace("/", ".")  # 同步替换
     """下载并解密资产。返回 bytes 或 None。"""
     tok = token or config.GH_TOKEN
     repo = repo or config.REPO
@@ -125,6 +127,7 @@ def download_asset(name, token=None, repo=None):
 
 
 def delete_asset(name, token=None, repo=None):
+    name = name.replace("/", ".")
     tok = token or config.GH_TOKEN
     repo = repo or config.REPO
     rel = get_release(token=tok, repo=repo)
