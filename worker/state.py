@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Worker 全局状态"""
 inst_cfg = None
+load_status = "初始化中"
 leader = None
 proc_mgr = None
 tunnel_mgr = None
