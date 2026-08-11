@@ -6,6 +6,7 @@ AES-256-GCM 加密模块
 密钥从 DEMO_KEY 环境变量读取（hex 64 位 = 32 字节）
 """
 import json
+import os
 import base64
 
 from Crypto.Cipher import AES
@@ -29,9 +30,10 @@ def _get_key():
 def encrypt_bytes(data: bytes) -> bytes:
     """加密字节流，返回 nonce(12) + tag(16) + ciphertext"""
     key = _get_key()
-    cipher = AES.new(key, AES.MODE_GCM)
+    nonce = os.urandom(12)  # 12字节nonce（标准GCM，pycryptodome默认16字节会错位）
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
     ct, tag = cipher.encrypt_and_digest(data)
-    return cipher.nonce + tag + ct
+    return nonce + tag + ct
 
 
 def decrypt_bytes(blob: bytes) -> bytes:
