@@ -38,6 +38,8 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading",
                     ping_timeout=60, ping_interval=25)
 logger = log.setup_logger("worker")
 
+log.clear_logs()
+
 JOB_STATE = {"last_url": "", "load_status": state.load_status}
 
 
@@ -57,6 +59,15 @@ def init_instance():
     state.inst_cfg = config.InstanceConfig(config.INSTANCE_ID, cfg)
     logger.info(f"[init] 实例 {config.INSTANCE_ID}: host={state.inst_cfg.tunnel_host}")
     return state.inst_cfg
+
+
+
+# ==================== 500 错误处理 ====================
+@app.errorhandler(500)
+def _handle_500(e):
+    import traceback
+    return jsonify(ok=False, error=str(e),
+                   traceback=traceback.format_exc()[:2000]), 500
 
 
 # ==================== 认证 ====================

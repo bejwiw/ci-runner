@@ -267,9 +267,19 @@ class S3Pool:
             logger.error(f"[s3] 写入元数据 {key} 失败: {e}")
             return False
 
+    _meta_cache = {}
+    _meta_cache_time = {}
+
     def get_meta(self, key):
+        # 60秒缓存，避免反复读取失败
+        now = time.time()
+        if key in self._meta_cache_time and now - self._meta_cache_time[key] < 60:
+            return self._meta_cache.get(key)
         try:
-            return self._get_client(0).get(key, prefix="")
+            data = self._get_client(0).get(key, prefix="")
+            self._meta_cache[key] = data
+            self._meta_cache_time[key] = now
+            return data
         except Exception as e:
             logger.warning(f"[s3] 读取元数据 {key} 失败: {e}")
             return None
@@ -382,7 +392,7 @@ class _S3Client:
             aws_access_key_id=self._access_key,
             aws_secret_access_key=self._secret_key,
             config=Config(
-                retries={"max_attempts": 0},
+                retries={"max_attempts": 3},
                 connect_timeout=10,
                 read_timeout=60,
                 max_pool_connections=5,

@@ -25,6 +25,17 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.urandom(24).hex()
 logger = log.setup_logger("manager")
 
+log.clear_logs()
+
+
+
+# ==================== 500 错误处理 ====================
+@app.errorhandler(500)
+def _handle_500(e):
+    import traceback
+    return jsonify(ok=False, error=str(e),
+                   traceback=traceback.format_exc()[:2000]), 500
+
 
 # ==================== 认证 ====================
 def _token():

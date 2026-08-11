@@ -24,6 +24,8 @@ _lock = threading.RLock()
 
 # S3 池引用（由 app.py 启动时注入）
 _s3pool = None
+_cache = {}
+_cache_time = {}
 
 
 def set_s3pool(pool):
@@ -34,7 +36,12 @@ def set_s3pool(pool):
 
 # ==================== 实例清单 ====================
 def load_instances():
-    """读取实例清单。优先 S3，回退 Releases。"""
+    """读取实例清单（60秒缓存）。优先 S3，回退 Releases。"""
+    import time as _t
+    now = _t.time()
+    if "instances" in _cache_time and now - _cache_time["instances"] < 60:
+        return _cache.get("instances", [])
+
     if _s3pool and _s3pool.is_ready():
         data = _s3pool.get_meta_json("meta/instances.json", default=None)
         if data is not None and isinstance(data, list):
@@ -43,7 +50,10 @@ def load_instances():
     data = releases.load_json_enc("instances.json.enc", default=[])
     count = len(data) if isinstance(data, list) else 0
     logger.info(f"[store] 从 Releases 加载 {count} 个实例")
-    return data if isinstance(data, list) else []
+    result = data if isinstance(data, list) else []
+    _cache["instances"] = result
+    _cache_time["instances"] = now
+    return result
 
 
 def save_instances(instances):
@@ -97,6 +107,10 @@ def save_instances(instances):
             else:
                 logger.warning("[store] S3 保存失败，降级 Releases")
 
+    # 清缓存
+    with _lock:
+        _cache.pop("instances", None)
+        _cache_time.pop("instances", None)
         # 写 Releases（降级/双写）
         try:
             releases.save_json_enc("instances.json.enc", instances)
@@ -132,11 +146,18 @@ def save_accounts(accounts):
 
 # ==================== 任务队列 ====================
 def load_tasks():
+    import time as _t
+    now = _t.time()
+    if "tasks" in _cache_time and now - _cache_time["tasks"] < 60:
+        return _cache.get("tasks", [])
     if _s3pool and _s3pool.is_ready():
         data = _s3pool.get_meta_json("meta/tasks.json", default=None)
         if data is not None and isinstance(data, list):
             return data
-    return releases.load_json_enc("tasks.json.enc", default=[])
+    result = releases.load_json_enc("tasks.json.enc", default=[])
+    _cache["tasks"] = result
+    _cache_time["tasks"] = now
+    return result
 
 
 def save_tasks(tasks):

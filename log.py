@@ -9,6 +9,17 @@ ghbox 统一日志系统
 """
 import os
 import time
+import datetime
+
+def _bj_time():
+    """北京时间"""
+    return datetime.timezone(datetime.timedelta(hours=8))
+
+class _BJFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        ct = datetime.datetime.fromtimestamp(record.created, tz=_bj_time())
+        return ct.strftime(datefmt or "%Y-%m-%d %H:%M:%S")
+
 import threading
 import logging
 import subprocess
@@ -67,6 +78,19 @@ class ContextFilter(logging.Filter):
         return True
 
 
+def clear_logs():
+    """启动时清理旧日志"""
+    global _ring
+    with _ring_lock:
+        _ring.clear()
+    with _stats_lock:
+        _stats.update({"error": 0, "warning": 0, "info": 0, "request": 0})
+    try:
+        open(LOG_FILE, "w").close()
+    except Exception:
+        pass
+
+
 def setup_logger(name="ghbox"):
     """获取/创建统一 logger"""
     with _loggers_lock:
@@ -75,12 +99,12 @@ def setup_logger(name="ghbox"):
         logger = logging.getLogger(name)
         if not logger.handlers:
             logger.setLevel(LOG_LEVEL)
-            fmt = logging.Formatter(
+            fmt = _BJFormatter(
                 "%(asctime)s [%(levelname)s] %(module)s: %(message)s",
-                "%Y-%m-%d %H:%M:%S")
+                datefmt="%Y-%m-%d %H:%M:%S")  # 北京时间
             logger.addHandler(logging.StreamHandler())
             rb = RingBufferHandler()
-            rb.setFormatter(logging.Formatter("%(message)s"))
+            rb.setFormatter(_BJFormatter("%(message)s"))
             logger.addHandler(rb)
             try:
                 fh = RotatingFileHandler(LOG_FILE, maxBytes=LOG_FILE_MAX_BYTES,
@@ -175,7 +199,7 @@ def process_logger(name):
     lg.setLevel(logging.DEBUG)
     try:
         fh = RotatingFileHandler(path, maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8")
-        fh.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%Y-%m-%d %H:%M:%S"))
+        fh.setFormatter(_BJFormatter("%(asctime)s %(message)s", "%Y-%m-%d %H:%M:%S"))
         lg.addHandler(fh)
     except Exception:
         pass
