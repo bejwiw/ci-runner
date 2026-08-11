@@ -337,4 +337,4 @@ def run():
     # Flask 服务（阻塞）
     log.request_logger(app)
     logger.info(f"[boot] Flask 端口 {config.PORT} ({time.time()-t0:.1f}s)")
-    socketio.run(app, host="0.0.0.0", port=config.PORT, allow_unsafe_werkzeug=True)
+    app.run(host="0.0.0.0", port=config.PORT, threaded=True)
