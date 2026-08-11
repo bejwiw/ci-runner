@@ -244,3 +244,71 @@ def instance_exec(inst_id):
             return jsonify(ok=True, result=json.loads(r.read().decode()))
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 502
+
+
+# ==================== 代理 API（实时转发到 worker）====================
+@bp.route("/api/instances/<inst_id>/logs")
+@require_auth
+def instance_logs(inst_id):
+    """代理查看worker日志（实时）"""
+    inst = store.get_instance(inst_id)
+    if not inst:
+        return jsonify(ok=False, error=f"实例 {inst_id} 不存在"), 404
+    host = inst.get("hostname")
+    if not host:
+        return jsonify(ok=False, error="实例无域名"), 404
+    limit = request.args.get("limit", "300")
+    keyword = request.args.get("keyword", "")
+    url = f"https://{host}/api/logs?limit={limit}"
+    if keyword:
+        url += f"&keyword={keyword}"
+    try:
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {config.EXEC_TOKEN}",
+            "User-Agent": "Mozilla/5.0 (ghbox-manager)"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return jsonify(json.loads(r.read().decode()))
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 502
+
+
+@bp.route("/api/instances/<inst_id>/processes")
+@require_auth
+def instance_processes(inst_id):
+    """代理查看worker进程列表（实时）"""
+    inst = store.get_instance(inst_id)
+    if not inst:
+        return jsonify(ok=False, error=f"实例 {inst_id} 不存在"), 404
+    host = inst.get("hostname")
+    if not host:
+        return jsonify(ok=False, error="实例无域名"), 404
+    url = f"https://{host}/api/processes"
+    try:
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {config.EXEC_TOKEN}",
+            "User-Agent": "Mozilla/5.0 (ghbox-manager)"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return jsonify(json.loads(r.read().decode()))
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 502
+
+
+@bp.route("/api/instances/<inst_id>/resource")
+@require_auth
+def instance_resource(inst_id):
+    """代理查看worker资源状态（实时）"""
+    inst = store.get_instance(inst_id)
+    if not inst:
+        return jsonify(ok=False, error=f"实例 {inst_id} 不存在"), 404
+    host = inst.get("hostname")
+    if not host:
+        return jsonify(ok=False, error="实例无域名"), 404
+    url = f"https://{host}/api/resource"
+    try:
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {config.EXEC_TOKEN}",
+            "User-Agent": "Mozilla/5.0 (ghbox-manager)"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return jsonify(json.loads(r.read().decode()))
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 502

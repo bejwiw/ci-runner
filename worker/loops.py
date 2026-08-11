@@ -52,14 +52,38 @@ def _backup_loop():
 
 
 def _report_running():
-    """周期向 manager 上报（每60秒）"""
+    """周期向 manager 上报（每60秒，携带S3摘要+进程数+磁盘）"""
     mgr = config.MANAGER_HOST or "ghvps2.kekeke.cc.cd"
     while True:
         try:
+            # 收集S3摘要
+            s3_summary = {"active": 0, "degraded": 0, "unavailable": 0}
+            if state.s3pool and state.s3pool.is_ready():
+                s3_summary = state.s3pool.get_health()
+                s3_summary.pop("ready", None)
+                s3_summary.pop("total", None)
+            # 收集进程数
+            proc_count = 0
+            if state.proc_mgr:
+                try:
+                    procs = state.proc_mgr.list_processes()
+                    proc_count = len(procs)
+                except Exception:
+                    pass
+            # 收集磁盘
+            disk_pct = 0
+            try:
+                stats = log.get_resource_stats()
+                disk_pct = round(stats.get("disk_use_pct", 0), 1)
+            except Exception:
+                pass
             url = f"https://{mgr}/api/instances/{config.INSTANCE_ID}/report"
             payload = json.dumps({
                 "token": config.EXEC_TOKEN,
                 "url": f"https://{state.inst_cfg.tunnel_host}" if state.inst_cfg else "",
+                "s3": s3_summary,
+                "procs": proc_count,
+                "disk_pct": disk_pct,
             }).encode()
             req = urllib.request.Request(url, data=payload, headers={
                 "Content-Type": "application/json",

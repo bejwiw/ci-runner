@@ -3,11 +3,14 @@
 S3 多账号存储池（Tigris）
 
 架构：
-  账号0 (bootstrap桶)  → 存元数据：路由表、计数器、实例清单、配置、任务队列
+  账号0 (bootstrap桶)  → 存元数据：路由表、计数器、实例清单、配置
   账号1~N (数据桶)     → 哈希分散存实例数据：db、files、processes
 
-防死循环：所有重试最多3次，fallback最多3个账号，遍历查找最多5个账号。
-防刷额度：路由表和计数器在内存中维护，最少60秒持久化一次到账号0。
+账号状态机：
+  active → (连续失败3次) → degraded → (再失败2次) → unavailable
+  unavailable → (每5分钟探测) → active/degraded
+
+S3不加密（私有访问），Releases降级存储才加密。
 """
 import os
 import json
@@ -28,6 +31,10 @@ ACCOUNTS_KEY = "meta/s3-accounts.txt"
 MAX_FALLBACK = 3
 MAX_SCAN = 5
 MAX_RETRIES = 3
+RECOVERY_INTERVAL = 300       # 5分钟探测一次unavailable账号
+DEGRADED_THRESHOLD = 3        # 连续失败3次→degraded
+UNAVAILABLE_THRESHOLD = 5     # 连续失败5次→unavailable
+META_CACHE_TTL = 60           # 元数据缓存60秒
 
 
 def _parse_accounts(text):
@@ -74,7 +81,10 @@ class S3Pool:
         self._clients = {}
         self._last_state_save = 0
         self._initialized = False
+        self._meta_cache = {}
+        self._meta_cache_time = {}
 
+    # ==================== 初始化 ====================
     def init(self):
         try:
             raw = self._get_client(0).get(ACCOUNTS_KEY, prefix="")
@@ -92,15 +102,23 @@ class S3Pool:
         for i in range(len(self._accounts)):
             self._counters[i] = {
                 "a_count": 0, "b_count": 0, "used_bytes": 0,
-                "status": "active", "month": current_month,
+                "status": "active", "fail_count": 0,
+                "last_error": "", "last_error_time": 0,
+                "last_success": 0, "month": current_month,
             }
         self._load_state()
         self._initialized = True
+        self.start_recovery()
         return True
 
     def is_ready(self):
         return self._initialized
 
+    def start_recovery(self):
+        threading.Thread(target=self._recovery_loop, daemon=True).start()
+        logger.info("[s3] 恢复探测线程已启动")
+
+    # ==================== S3 底层操作 ====================
     def _get_client(self, idx):
         if idx in self._clients:
             return self._clients[idx]
@@ -122,9 +140,10 @@ class S3Pool:
         h = int(hashlib.md5(key.encode()).hexdigest(), 16)
         return (h % len(self._accounts)) + 1
 
+    # ==================== 账号状态管理 ====================
     def _is_writable(self, idx):
         c = self._counters.get(idx, {})
-        if c.get("status") != "active":
+        if c.get("status") == "unavailable":
             return False
         if c.get("a_count", 0) >= A_LIMIT:
             return False
@@ -132,8 +151,13 @@ class S3Pool:
             return False
         return True
 
+    def _account_priority(self, idx):
+        c = self._counters.get(idx, {})
+        if c.get("status") == "degraded":
+            return 1
+        return 0
+
     def _select_write_account(self, key, exclude_list=None):
-        """选写入账号，exclude_list 是要排除的账号索引列表"""
         exclude_list = exclude_list or []
         with self._lock:
             route = self._routing.get(key)
@@ -147,9 +171,41 @@ class S3Pool:
             candidates = [i for i in range(1, len(self._accounts) + 1)
                           if i not in exclude_list and self._is_writable(i)]
             if candidates:
-                return min(candidates, key=lambda i: self._counters[i]["a_count"])
+                return min(candidates,
+                           key=lambda i: (self._account_priority(i),
+                                          self._counters[i]["a_count"]))
         return None
 
+    def _record_failure(self, idx, error):
+        with self._lock:
+            c = self._counters.get(idx, {})
+            if not c:
+                return
+            c["fail_count"] = c.get("fail_count", 0) + 1
+            c["last_error"] = str(error)[:200]
+            c["last_error_time"] = time.time()
+            fc = c["fail_count"]
+            old_status = c.get("status", "active")
+            if fc >= UNAVAILABLE_THRESHOLD:
+                c["status"] = "unavailable"
+                if old_status != "unavailable":
+                    logger.warning(f"[s3] 账号{idx} → unavailable (连续{fc}次失败: {c['last_error'][:80]})")
+            elif fc >= DEGRADED_THRESHOLD:
+                c["status"] = "degraded"
+                if old_status == "active":
+                    logger.info(f"[s3] 账号{idx} → degraded (连续{fc}次失败)")
+
+    def _record_success(self, idx):
+        with self._lock:
+            c = self._counters.get(idx, {})
+            if not c:
+                return
+            if c.get("fail_count", 0) > 0 or c.get("status") != "active":
+                c["fail_count"] = 0
+                c["status"] = "active"
+            c["last_success"] = time.time()
+
+    # ==================== 写入 ====================
     def put(self, key, data):
         if not self._initialized:
             return False
@@ -168,13 +224,14 @@ class S3Pool:
                             "size": len(data),
                             "updated": time.time(),
                         }
+                    self._record_success(account_idx)
                     return True
             except Exception as e:
                 logger.warning(f"[s3] 写入 {key} 到账号{account_idx} 失败(第{attempt+1}次): {e}")
+                self._record_failure(account_idx, e)
         return self._put_fallback(key, data, exclude_list=[account_idx])
 
     def _put_fallback(self, key, data, exclude_list):
-        """fallback 写入（最多尝试 MAX_FALLBACK 个其他账号）"""
         for _ in range(MAX_FALLBACK):
             account_idx = self._select_write_account(key, exclude_list=exclude_list)
             if account_idx is None:
@@ -190,13 +247,16 @@ class S3Pool:
                             "size": len(data),
                             "updated": time.time(),
                         }
+                    self._record_success(account_idx)
                     logger.info(f"[s3] fallback 写入 {key} 到账号{account_idx}")
                     return True
             except Exception as e:
                 logger.warning(f"[s3] fallback 写入 {key} 到账号{account_idx} 失败: {e}")
+                self._record_failure(account_idx, e)
         logger.error(f"[s3] {key} 所有 fallback 都失败")
         return False
 
+    # ==================== 读取 ====================
     def get(self, key):
         if not self._initialized:
             return None
@@ -204,29 +264,37 @@ class S3Pool:
             route = self._routing.get(key)
         if route:
             idx = route["account"]
+            if self._counters.get(idx, {}).get("status") != "unavailable":
+                try:
+                    data = self._get_client(idx).get(key)
+                    if data is not None:
+                        with self._lock:
+                            self._counters[idx]["b_count"] += 1
+                        self._record_success(idx)
+                        return data
+                except Exception as e:
+                    logger.warning(f"[s3] 从账号{idx}读取 {key} 失败: {e}")
+                    self._record_failure(idx, e)
+        idx = self._hash_idx(key)
+        if self._counters.get(idx, {}).get("status") != "unavailable":
             try:
                 data = self._get_client(idx).get(key)
                 if data is not None:
                     with self._lock:
                         self._counters[idx]["b_count"] += 1
+                        self._routing[key] = {
+                            "account": idx, "size": len(data), "updated": time.time(),
+                        }
+                    self._record_success(idx)
                     return data
             except Exception as e:
-                logger.warning(f"[s3] 从账号{idx}读取 {key} 失败: {e}")
-        idx = self._hash_idx(key)
-        try:
-            data = self._get_client(idx).get(key)
-            if data is not None:
-                with self._lock:
-                    self._counters[idx]["b_count"] += 1
-                    self._routing[key] = {
-                        "account": idx, "size": len(data), "updated": time.time(),
-                    }
-                return data
-        except Exception as e:
-            logger.warning(f"[s3] 从账号{idx}(哈希)读取 {key} 失败: {e}")
+                logger.warning(f"[s3] 从账号{idx}(哈希)读取 {key} 失败: {e}")
+                self._record_failure(idx, e)
         for offset in range(1, MAX_SCAN + 1):
             alt_idx = ((idx + offset - 1) % len(self._accounts)) + 1
             if alt_idx == idx:
+                continue
+            if self._counters.get(alt_idx, {}).get("status") == "unavailable":
                 continue
             try:
                 data = self._get_client(alt_idx).get(key)
@@ -236,12 +304,15 @@ class S3Pool:
                         self._routing[key] = {
                             "account": alt_idx, "size": len(data), "updated": time.time(),
                         }
+                    self._record_success(alt_idx)
                     logger.info(f"[s3] 从账号{alt_idx}遍历找到 {key}")
                     return data
-            except Exception:
+            except Exception as e:
+                self._record_failure(alt_idx, e)
                 continue
         return None
 
+    # ==================== 删除 ====================
     def delete(self, key):
         if not self._initialized:
             return False
@@ -255,11 +326,14 @@ class S3Pool:
             with self._lock:
                 self._counters[idx]["a_count"] += 1
                 self._routing.pop(key, None)
+            self._record_success(idx)
             return True
         except Exception as e:
             logger.warning(f"[s3] 删除 {key} 失败: {e}")
+            self._record_failure(idx, e)
             return False
 
+    # ==================== 元数据（账号0）====================
     def put_meta(self, key, data):
         try:
             return self._get_client(0).put(key, data, prefix="")
@@ -267,13 +341,9 @@ class S3Pool:
             logger.error(f"[s3] 写入元数据 {key} 失败: {e}")
             return False
 
-    _meta_cache = {}
-    _meta_cache_time = {}
-
     def get_meta(self, key):
-        # 60秒缓存，避免反复读取失败
         now = time.time()
-        if key in self._meta_cache_time and now - self._meta_cache_time[key] < 60:
+        if key in self._meta_cache_time and now - self._meta_cache_time[key] < META_CACHE_TTL:
             return self._meta_cache.get(key)
         try:
             data = self._get_client(0).get(key, prefix="")
@@ -296,6 +366,7 @@ class S3Pool:
         except Exception:
             return default
 
+    # ==================== 状态持久化 ====================
     def save_state(self):
         if not self._initialized:
             return
@@ -329,11 +400,10 @@ class S3Pool:
                 idx = int(idx_str)
                 if idx < len(self._accounts):
                     existing = self._counters.get(idx, {})
-                    existing["a_count"] = c.get("a_count", 0)
-                    existing["b_count"] = c.get("b_count", 0)
-                    existing["used_bytes"] = c.get("used_bytes", 0)
-                    existing["status"] = c.get("status", "active")
-                    existing["month"] = c.get("month", 0)
+                    for field in ("a_count", "b_count", "used_bytes", "status",
+                                  "fail_count", "last_error", "last_error_time",
+                                  "last_success", "month"):
+                        existing[field] = c.get(field, existing.get(field, 0))
                     self._counters[idx] = existing
         logger.info(f"[s3] 加载了 {len(self._routing)} 路由, {len(self._counters)} 账号状态")
 
@@ -346,15 +416,54 @@ class S3Pool:
                     c["a_count"] = 0
                     c["b_count"] = 0
                     c["status"] = "active"
+                    c["fail_count"] = 0
                     c["month"] = current_month
                     logger.info(f"[s3] 账号{idx} 月度重置")
 
+    # ==================== 恢复探测 ====================
+    def _recovery_loop(self):
+        while not self._initialized:
+            time.sleep(1)
+        while True:
+            time.sleep(RECOVERY_INTERVAL)
+            try:
+                self._probe_unavailable()
+            except Exception as e:
+                logger.error(f"[s3] 恢复探测异常: {e}")
+
+    def _probe_unavailable(self):
+        with self._lock:
+            candidates = [idx for idx, c in self._counters.items()
+                          if c.get("status") == "unavailable" and idx > 0]
+        if not candidates:
+            return
+        logger.info(f"[s3] 探测 {len(candidates)} 个 unavailable 账号")
+        for idx in candidates:
+            try:
+                test_key = f"_healthcheck/{idx}"
+                self._get_client(idx).put(test_key, b"ok")
+                data = self._get_client(idx).get(test_key)
+                if data == b"ok":
+                    self._get_client(idx).delete(test_key)
+                    self._record_success(idx)
+                    logger.info(f"[s3] 账号{idx} 恢复为 active")
+            except Exception as e:
+                with self._lock:
+                    c = self._counters.get(idx, {})
+                    c["last_error"] = str(e)[:200]
+                    c["last_error_time"] = time.time()
+
+    # ==================== 状态查询 ====================
     def get_status(self):
         if not self._initialized:
             return {"ready": False}
         with self._lock:
             active = sum(1 for c in self._counters.values()
                          if c.get("status") == "active")
+            degraded = sum(1 for c in self._counters.values()
+                           if c.get("status") == "degraded")
+            unavailable = sum(1 for c in self._counters.values()
+                              if c.get("status") == "unavailable")
             total_a = sum(c.get("a_count", 0) for c in self._counters.values())
             total_b = sum(c.get("b_count", 0) for c in self._counters.values())
             total_storage = sum(c.get("used_bytes", 0) for c in self._counters.values())
@@ -362,10 +471,52 @@ class S3Pool:
             "ready": True,
             "total_accounts": len(self._accounts),
             "active_accounts": active,
+            "degraded_accounts": degraded,
+            "unavailable_accounts": unavailable,
             "routing_entries": len(self._routing),
             "total_a_ops": total_a,
             "total_b_ops": total_b,
             "total_storage_mb": round(total_storage / (1024 * 1024), 1),
+        }
+
+    def get_health(self):
+        if not self._initialized:
+            return {"ready": False}
+        s = self.get_status()
+        return {
+            "ready": s["ready"],
+            "active": s["active_accounts"],
+            "degraded": s["degraded_accounts"],
+            "unavailable": s["unavailable_accounts"],
+            "total": s["total_accounts"],
+        }
+
+    def get_account_status(self, limit=50):
+        if not self._initialized:
+            return {"accounts": [], "total": 0}
+        with self._lock:
+            all_accts = []
+            for idx, c in sorted(self._counters.items()):
+                if idx == 0:
+                    continue
+                if c.get("status") == "active" and c.get("fail_count", 0) == 0:
+                    continue
+                all_accts.append({
+                    "idx": idx,
+                    "status": c.get("status", "active"),
+                    "a_count": c.get("a_count", 0),
+                    "b_count": c.get("b_count", 0),
+                    "used_mb": round(c.get("used_bytes", 0) / (1024 * 1024), 1),
+                    "fail_count": c.get("fail_count", 0),
+                    "last_error": c.get("last_error", "")[:100],
+                    "last_error_time": c.get("last_error_time", 0),
+                    "last_success": c.get("last_success", 0),
+                })
+        non_active = all_accts[:limit]
+        return {
+            "accounts": non_active,
+            "total_non_active": len(all_accts),
+            "total": len(self._accounts),
         }
 
 

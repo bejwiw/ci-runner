@@ -70,6 +70,18 @@ def _handle_500(e):
                    traceback=traceback.format_exc()[:2000]), 500
 
 
+
+# ==================== 500 错误处理（不黑盒）====================
+@app.errorhandler(Exception)
+def _handle_error(e):
+    import traceback
+    from werkzeug.exceptions import HTTPException
+    code = e.code if isinstance(e, HTTPException) else 500
+    if code == 404:
+        return jsonify(ok=False, error="Not Found"), 404
+    return jsonify(ok=False, error=str(e),
+                   traceback=traceback.format_exc()[:2000]), code
+
 # ==================== 认证 ====================
 def _check(data=None):
     token = ""

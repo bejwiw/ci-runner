@@ -37,6 +37,18 @@ def _handle_500(e):
                    traceback=traceback.format_exc()[:2000]), 500
 
 
+
+# ==================== 500 错误处理（不黑盒）====================
+@app.errorhandler(Exception)
+def _handle_error(e):
+    import traceback
+    from werkzeug.exceptions import HTTPException
+    code = e.code if isinstance(e, HTTPException) else 500
+    if code == 404:
+        return jsonify(ok=False, error="Not Found"), 404
+    return jsonify(ok=False, error=str(e),
+                   traceback=traceback.format_exc()[:2000]), code
+
 # ==================== 认证 ====================
 def _token():
     t = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
@@ -140,6 +152,9 @@ def worker_heartbeat():
             "job_id": d.get("job_id", ""),
             "last_seen": time.time(),
             "version": d.get("version", "unknown"),
+            "s3": d.get("s3", {}),
+            "procs": d.get("procs", 0),
+            "disk_pct": d.get("disk_pct", 0),
         }
     return jsonify(ok=True)
 
@@ -167,6 +182,24 @@ def _task_add_account(params, task):
         raise RuntimeError(res.get("error", "未知错误"))
     logger.info(f"[task] 账号 {params.get('name')} 配置完成")
 
+
+
+
+@app.route("/api/s3/accounts")
+@require_auth
+def s3_accounts():
+    """每个账号的详细状态（非active的优先显示）"""
+    if state.s3pool:
+        return jsonify(ok=True, **state.s3pool.get_account_status())
+    return jsonify(ok=False, error="S3 未初始化"), 503
+
+
+@app.route("/api/s3/health")
+def s3_health():
+    """S3健康摘要"""
+    if state.s3pool:
+        return jsonify(ok=True, **state.s3pool.get_health())
+    return jsonify(ok=False, error="S3 未初始化"), 503
 
 # ==================== 启动入口 ====================
 
