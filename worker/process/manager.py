@@ -64,8 +64,7 @@ class ProcessManager:
                 logger.warning(f"[process] S3 快照失败: {e}")
         # Releases 降级
         asset = f"inst-{inst_id}.processes.tar.gz.enc"
-        enc_data = crypto.encrypt_bytes(data)
-        releases.upload_chunked(asset, enc_data)
+        releases.upload_chunked(asset, data)
         logger.info(f"[process] 快照已存入 Releases ({len(data)} 字节)")
 
     def _download_snapshot(self):

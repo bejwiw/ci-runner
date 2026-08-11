@@ -159,9 +159,8 @@ def backup_database(inst_cfg=None):
         if _s3pool.put(db_key, data):
             logger.info(f"[backup] 数据库 → S3 ({len(data)} 字节)")
             return len(data), 1
-    # Releases（加密降级）
-    enc_data = crypto.encrypt_bytes(data)
-    size, parts = releases.upload_chunked(db_asset, enc_data)
+    # Releases（upload_chunked内部自动加密）
+    size, parts = releases.upload_chunked(db_asset, data)
     logger.info(f"[backup] 数据库 → Releases ({size} 字节, {parts} 分片)")
     return size, parts
 
@@ -179,9 +178,8 @@ def backup_files(inst_cfg=None):
         if _s3pool.put(files_key, data):
             logger.info(f"[backup] 文件 → S3 ({len(data)} 字节)")
             return len(data), 1
-    # Releases（加密降级）
-    enc_data = crypto.encrypt_bytes(data)
-    size, parts = releases.upload_chunked(files_asset, enc_data)
+    # Releases（upload_chunked内部自动加密）
+    size, parts = releases.upload_chunked(files_asset, data)
     logger.info(f"[backup] 文件 → Releases ({size} 字节, {parts} 分片)")
     return size, parts
 
