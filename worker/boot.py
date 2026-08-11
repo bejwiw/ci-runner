@@ -28,8 +28,6 @@ def deferred_init():
 
     # 1. 数据恢复
     try:
-        JOB_STATE = {"last_url": state.tunnel_mgr.url if state.tunnel_mgr else "",
-                     "load_status": "恢复中"}
         state.load_status = persistence.load_or_create(state.inst_cfg)
         logger.info(f"[boot] 数据恢复完成 ({time.time()-t0:.1f}s)")
         persistence.save_prev_backup(state.inst_cfg)
