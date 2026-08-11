@@ -337,14 +337,4 @@ def run():
     # Flask 服务（阻塞）
     log.request_logger(app)
     logger.info(f"[boot] Flask 端口 {config.PORT} ({time.time()-t0:.1f}s)")
-    from http.server import HTTPServer, BaseHTTPRequestHandler
-    import json as _json
-    class _H(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(_json.dumps({"ok": True, "debug": True, "port": config.PORT}).encode())
-        def log_message(self, *a): pass
-    logger.info("[boot] DEBUG HTTP server on port 8080")
-    HTTPServer(("0.0.0.0", config.PORT), _H).serve_forever()
+    socketio.run(app, host="0.0.0.0", port=config.PORT, allow_unsafe_werkzeug=True)
