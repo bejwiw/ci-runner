@@ -38,7 +38,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading",
                     ping_timeout=60, ping_interval=25)
 logger = log.setup_logger("worker")
 
-JOB_STATE = {"last_url": "", "load_status": "初始化中"}
+JOB_STATE = {"last_url": "", "load_status": state.load_status}
 
 
 def init_instance():
@@ -90,7 +90,7 @@ def status():
     return jsonify(ok=True, instance=config.INSTANCE_ID, job_id=core_lock.JOB_ID,
                    elapsed=core_status.elapsed(),
                    leader=state.leader.is_leader if state.leader else False,
-                   url=JOB_STATE["last_url"], source=JOB_STATE["load_status"],
+                   url=JOB_STATE["last_url"], source=state.load_status,
                    tunnel_host=state.inst_cfg.tunnel_host if state.inst_cfg else config.TUNNEL_HOST)
 
 
