@@ -37,7 +37,7 @@ def _parse_accounts(text):
     for line in text.split("\n"):
         line = line.strip()
         if line.startswith("[profile"):
-            if current and "aws_access_key_id" in current:
+            if current and "access_key" in current:
                 accounts.append(current)
             current = {}
         elif "=" in line and not line.startswith("#"):
@@ -50,7 +50,7 @@ def _parse_accounts(text):
                 current["secret_key"] = val
         elif line.startswith("# bucket:"):
             current["bucket"] = line.split(":", 1)[1].strip()
-    if current and "aws_access_key_id" in current:
+    if current and "access_key" in current:
         accounts.append(current)
     return accounts
 
