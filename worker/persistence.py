@@ -102,8 +102,8 @@ def restore_files_from_bytes(data):
 def load_or_create(inst_cfg):
     """恢复实例数据（S3 优先 + Releases 降级）"""
     inst_id = inst_cfg.instance_id if inst_cfg else "global"
-    db_key = f"inst-data/{inst_id}/db.enc"
-    files_key = f"inst-files/{inst_id}/files.tar.gz.enc"
+    db_key = f"inst-data/{inst_id}/db"
+    files_key = f"inst-files/{inst_id}/files.tar.gz"
     db_asset = inst_cfg.asset_db if inst_cfg else config.ASSET_DB
     files_asset = inst_cfg.asset_files if inst_cfg else config.ASSET_FILES
     status_msg = "新建初始数据库"
@@ -112,9 +112,7 @@ def load_or_create(inst_cfg):
     db_data = None
     if _s3pool and _s3pool.is_ready():
         try:
-            blob = _s3pool.get(db_key)
-            if blob:
-                db_data = crypto.decrypt_bytes(blob)
+            db_data = _s3pool.get(db_key)
         except Exception as e:
             logger.warning(f"[persist] S3 数据库读取失败: {e}")
     if db_data is None:
@@ -131,9 +129,7 @@ def load_or_create(inst_cfg):
     files_data = None
     if _s3pool and _s3pool.is_ready():
         try:
-            blob = _s3pool.get(files_key)
-            if blob:
-                files_data = crypto.decrypt_bytes(blob)
+            files_data = _s3pool.get(files_key)
         except Exception as e:
             logger.warning(f"[persist] S3 文件读取失败: {e}")
     if files_data is None:
@@ -148,7 +144,7 @@ def load_or_create(inst_cfg):
 def backup_database(inst_cfg=None):
     """备份数据库。S3 优先，Releases 降级。"""
     inst_id = inst_cfg.instance_id if inst_cfg else "global"
-    db_key = f"inst-data/{inst_id}/db.enc"
+    db_key = f"inst-data/{inst_id}/db"
     db_asset = inst_cfg.asset_db if inst_cfg else config.ASSET_DB
     with _db_lock:
         conn = _get_db()
@@ -158,14 +154,14 @@ def backup_database(inst_cfg=None):
             pass
     with open(config.DB_FILE, "rb") as f:
         data = f.read()
-    enc_data = crypto.encrypt_bytes(data)
-    # S3
+    # S3（不加密，S3本身私有访问）
     if _s3pool and _s3pool.is_ready():
-        if _s3pool.put(db_key, enc_data):
+        if _s3pool.put(db_key, data):
             logger.info(f"[backup] 数据库 → S3 ({len(data)} 字节)")
             return len(data), 1
-    # Releases
-    size, parts = releases.upload_chunked(db_asset, data)
+    # Releases（加密降级）
+    enc_data = crypto.encrypt_bytes(data)
+    size, parts = releases.upload_chunked(db_asset, enc_data)
     logger.info(f"[backup] 数据库 → Releases ({size} 字节, {parts} 分片)")
     return size, parts
 
@@ -173,19 +169,19 @@ def backup_database(inst_cfg=None):
 def backup_files(inst_cfg=None):
     """备份 ~/files。S3 优先，Releases 降级。"""
     inst_id = inst_cfg.instance_id if inst_cfg else "global"
-    files_key = f"inst-files/{inst_id}/files.tar.gz.enc"
+    files_key = f"inst-files/{inst_id}/files.tar.gz"
     files_asset = inst_cfg.asset_files if inst_cfg else config.ASSET_FILES
     data = backup_files_to_bytes()
     if not data:
         return None
-    enc_data = crypto.encrypt_bytes(data)
-    # S3
+    # S3（不加密）
     if _s3pool and _s3pool.is_ready():
-        if _s3pool.put(files_key, enc_data):
+        if _s3pool.put(files_key, data):
             logger.info(f"[backup] 文件 → S3 ({len(data)} 字节)")
             return len(data), 1
-    # Releases
-    size, parts = releases.upload_chunked(files_asset, data)
+    # Releases（加密降级）
+    enc_data = crypto.encrypt_bytes(data)
+    size, parts = releases.upload_chunked(files_asset, enc_data)
     logger.info(f"[backup] 文件 → Releases ({size} 字节, {parts} 分片)")
     return size, parts
 

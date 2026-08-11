@@ -53,19 +53,19 @@ class ProcessManager:
         if not data:
             return
         inst_id = self.inst_cfg.instance_id
-        enc_data = crypto.encrypt_bytes(data)
-        key = f"inst-proc/{inst_id}/proc.tar.gz.enc"
+        key = f"inst-proc/{inst_id}/proc.tar.gz"
         # S3
         if self.s3pool and self.s3pool.is_ready():
             try:
-                if self.s3pool.put(key, enc_data):
+                if self.s3pool.put(key, data):
                     logger.info(f"[process] 快照已存入 S3 ({len(data)} 字节)")
                     return
             except Exception as e:
                 logger.warning(f"[process] S3 快照失败: {e}")
         # Releases 降级
         asset = f"inst-{inst_id}.processes.tar.gz.enc"
-        releases.upload_chunked(asset, data)
+        enc_data = crypto.encrypt_bytes(data)
+        releases.upload_chunked(asset, enc_data)
         logger.info(f"[process] 快照已存入 Releases ({len(data)} 字节)")
 
     def _download_snapshot(self):
@@ -74,13 +74,12 @@ class ProcessManager:
             return
         from core import releases
         inst_id = self.inst_cfg.instance_id
-        key = f"inst-proc/{inst_id}/proc.tar.gz.enc"
+        key = f"inst-proc/{inst_id}/proc.tar.gz"
         # S3
         if self.s3pool and self.s3pool.is_ready():
             try:
-                blob = self.s3pool.get(key)
-                if blob:
-                    raw = crypto.decrypt_bytes(blob)
+                raw = self.s3pool.get(key)
+                if raw:
                     pbackup.unpack_processes_tar(raw)
                     logger.info(f"[process] 快照从 S3 恢复 ({len(raw)} 字节)")
                     return
