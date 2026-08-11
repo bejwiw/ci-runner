@@ -283,6 +283,30 @@ class S3Pool:
             self._record_failure(account_idx, e)
             return False
 
+
+    # ==================== 兼容方法（哈希分散到数据账号）====================
+    def get_meta_json(self, key, default=None):
+        """读取JSON元数据（一致性哈希查找数据账号）"""
+        raw = self.get(key)
+        if raw is None:
+            return default
+        try:
+            return json.loads(raw.decode())
+        except Exception:
+            return default
+
+    def put_meta_json(self, key, obj):
+        """写入JSON元数据（一致性哈希分散到数据账号）"""
+        return self.put(key, json.dumps(obj, ensure_ascii=False).encode())
+
+    def get_meta(self, key):
+        """读取原始元数据"""
+        return self.get(key)
+
+    def put_meta(self, key, data):
+        """写入原始元数据"""
+        return self.put(key, data)
+
     # ==================== bootstrap 桶（只读账号列表）====================
     def get_accounts_raw(self):
         """从 bootstrap 桶读取账号列表"""
