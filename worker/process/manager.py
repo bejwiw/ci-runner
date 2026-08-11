@@ -164,10 +164,10 @@ class ProcessManager:
             cfg = pconfig.load_proc_config(name) or {}
             pid = None
             with self._lock:
-                if name in self.known:
-                    pid = self.known[name].get("pid")
+                entry = self.known.get(name, {})
+                pid = entry.get("pid")
             running = bool(pid and utils.is_alive(pid))
-            result.append({
+            item = {
                 "name": name,
                 "cmdline": meta.get("cmdline", cfg.get("command", "")),
                 "cwd": meta.get("cwd", cfg.get("cwd", "")),
@@ -176,7 +176,9 @@ class ProcessManager:
                 "pid": pid, "running": running,
                 "auto_restart": cfg.get("auto_restart", True),
                 "saved_at": meta.get("saved_at", cfg.get("saved_at")),
-            })
+                "tunnels": tunnels.get_tunnel_status(cfg, entry),
+            }
+            result.append(item)
         return result
 
     def get_process_log(self, name, limit=200):
