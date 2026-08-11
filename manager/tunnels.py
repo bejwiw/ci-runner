@@ -65,12 +65,22 @@ def create_tunnel(hostname, service_url="http://127.0.0.1:8080"):
         data={"config": {"ingress": [
             {"hostname": hostname, "service": service_url},
             {"service": "http_status:404"}]}})
-    # 3. DNS CNAME
+    # 3. DNS CNAME（处理已存在的记录）
     if config.CF_ZONE_ID:
-        _cf_request("POST",
+        dns_status, dns_d = _cf_request("POST",
             f"https://api.cloudflare.com/client/v4/zones/{config.CF_ZONE_ID}/dns_records",
             data={"type": "CNAME", "name": hostname,
                   "content": f"{tid}.cfargotunnel.com", "proxied": True})
+        if dns_status in (400, 409):
+            # DNS记录已存在，查找并更新
+            gs, gd = _cf_request("GET",
+                f"https://api.cloudflare.com/client/v4/zones/{config.CF_ZONE_ID}/dns_records?name={hostname}")
+            if gs == 200:
+                for rec in gd.get("result", []):
+                    _cf_request("PUT",
+                        f"https://api.cloudflare.com/client/v4/zones/{config.CF_ZONE_ID}/dns_records/{rec['id']}",
+                        data={"type": "CNAME", "name": hostname,
+                              "content": f"{tid}.cfargotunnel.com", "proxied": True})
     logger.info(f"[tunnel] 隧道创建成功: {hostname} ({tid})")
     return tid, ttoken
 
