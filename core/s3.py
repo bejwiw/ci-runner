@@ -44,8 +44,10 @@ def _parse_accounts(text):
             key, _, val = line.partition("=")
             key = key.strip()
             val = val.strip()
-            if key in ("aws_access_key_id", "aws_secret_access_key"):
-                current[key] = val
+            if key == "aws_access_key_id":
+                current["access_key"] = val
+            elif key == "aws_secret_access_key":
+                current["secret_key"] = val
         elif line.startswith("# bucket:"):
             current["bucket"] = line.split(":", 1)[1].strip()
     if current and "aws_access_key_id" in current:
