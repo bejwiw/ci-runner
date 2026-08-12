@@ -179,6 +179,17 @@ class ProcessManager:
 
     def list_processes(self):
         procs = pconfig.load_manifest()
+        if not procs:
+            # manifest为空，从processes目录扫描ghvps.json
+            import os
+            proc_dir = pconfig.proc_dir()
+            if os.path.isdir(proc_dir):
+                for name in os.listdir(proc_dir):
+                    if name == "manifest.json":
+                        continue
+                    ghvps = os.path.join(proc_dir, name, "ghvps.json")
+                    if os.path.exists(ghvps):
+                        procs[name] = {}
         result = []
         for name, meta in procs.items():
             cfg = pconfig.load_proc_config(name) or {}
