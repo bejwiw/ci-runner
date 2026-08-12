@@ -25,6 +25,13 @@ def restore_files(cfg):
     cwd = cfg.get("cwd") or ""
     if not src or not os.path.isdir(src) or not cwd:
         return True
+    # 修正cwd：如果不是FILES_DIR下的路径，迁移到FILES_DIR下
+    if not cwd.startswith(config.FILES_DIR):
+        old_basename = os.path.basename(cwd.rstrip("/")) if cwd else name
+        cwd = os.path.join(config.FILES_DIR, old_basename)
+        cfg["cwd"] = cwd
+        pconfig.save_proc_config(cfg)
+        logger.info(f"[restore] {name} cwd 迁移到 {cwd}")
     os.makedirs(cwd, exist_ok=True)
     count = utils.copy_tree(src, cwd, set())
     logger.info(f"[restore] {name} 恢复了 {count} 个文件")
