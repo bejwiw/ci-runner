@@ -205,6 +205,18 @@ def instance_report(inst_id):
     if not _is_leader():
         return jsonify(ok=False, error="备份节点"), 503
     d = request.get_json(silent=True) or {}
+    # 存储worker上报的S3统计到worker_heartbeats
+    _s3 = d.get("s3", {})
+    state.worker_heartbeats[inst_id] = {
+        "job_id": d.get("job_id", ""),
+        "last_seen": time.time(),
+        "s3": _s3,
+        "procs": d.get("procs", 0),
+        "disk_pct": d.get("disk_pct", 0),
+        "a_ops": _s3.get("a_ops", 0),
+        "b_ops": _s3.get("b_ops", 0),
+        "storage_mb": _s3.get("storage_mb", 0),
+    }
     inst = store.get_instance(inst_id)
     if not inst:
         cfg = store.load_instance_config(inst_id)

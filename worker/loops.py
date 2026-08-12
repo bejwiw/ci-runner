@@ -64,9 +64,6 @@ def _report_running():
                 s3_summary["a_ops"] = _st.get("total_a_ops", 0)
                 s3_summary["b_ops"] = _st.get("total_b_ops", 0)
                 s3_summary["storage_mb"] = _st.get("total_storage_mb", 0)
-            else:
-                _p = state.s3pool
-                logger.info(f"[report] S3调试: s3pool={_p}, ready={_p.is_ready() if _p else None}, initialized={_p._initialized if _p else None}")
             # 收集进程数
             proc_count = 0
             if state.proc_mgr:
