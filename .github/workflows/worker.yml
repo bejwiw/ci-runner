@@ -32,7 +32,7 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
 
       - name: Install deps
-        run: pip install -r requirements.txt
+        run: sudo -E pip install -r requirements.txt
 
       - name: Install cloudflared
         run: |
