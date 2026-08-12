@@ -162,7 +162,8 @@ def pack_processes_to_disk():
     """打包processes目录到磁盘文件"""
     if not os.path.isdir(pconfig.proc_dir()):
         return None
-    tmp = os.path.join(config.FILES_DIR, ".proc_backup.tar.gz")
+    tmp = os.path.join(os.path.expanduser("~"), ".backup_tmp", "proc_backup.tar.gz")
+    os.makedirs(os.path.dirname(tmp), exist_ok=True)
     with tarfile.open(tmp, "w:gz") as tar:
         tar.add(pconfig.proc_dir(), arcname="processes")
     return tmp

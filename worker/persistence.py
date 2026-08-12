@@ -126,7 +126,7 @@ def load_or_create(inst_cfg):
         create_new_db()
 
     # 文件
-    tmp_files = os.path.join(config.FILES_DIR, ".restore_files.tar.gz")
+    tmp_files = os.path.join(TMP_DIR, "restore_files.tar.gz")
     files_ok = False
     if _s3pool and _s3pool.is_ready():
         try:
@@ -207,11 +207,13 @@ def backup_files(inst_cfg=None):
 
 def backup_files_to_disk():
     """tar写磁盘临时文件（避免内存爆炸）"""
-    tmp = os.path.join(config.FILES_DIR, ".backup_files.tar.gz")
+    os.makedirs(TMP_DIR, exist_ok=True)
+    tmp = os.path.join(TMP_DIR, "backup_files.tar.gz")
     try:
         result = subprocess.run(
-            ["tar", "czf", tmp, "-C", os.path.expanduser("~"), "files"],
+            ["sudo", "tar", "czf", tmp, "-C", os.path.expanduser("~"), "files"],
             capture_output=True, timeout=300)
+        subprocess.run(["sudo", "chown", "runner:runner", tmp], timeout=5)
         if result.returncode != 0:
             logger.error(f"[persist] 文件打包失败: {result.stderr.decode(errors='replace')[:200]}")
             return None
@@ -225,7 +227,7 @@ def restore_files_from_file(file_path):
     """从磁盘文件解包"""
     try:
         result = subprocess.run(
-            ["tar", "xzf", file_path, "-C", os.path.expanduser("~")],
+            ["sudo", "tar", "xzf", file_path, "-C", os.path.expanduser("~")],
             capture_output=True, timeout=300)
         if result.returncode != 0:
             logger.error(f"[persist] 文件解压失败: {result.stderr.decode(errors='replace')[:200]}")
