@@ -34,10 +34,12 @@ class ProcessManager:
         saved, meta = pbackup.snapshot(reason=reason)
         with self._lock:
             for name, m in meta.items():
+                old_entry = self.known.get(name, {})
                 self.known[name] = {
                     "name": name, "pid": m.get("pid"), "status": "running",
                     "config": pconfig.load_proc_config(name),
                     "started_at": m.get("saved_at"),
+                    "tunnel_pids": old_entry.get("tunnel_pids", {}),
                 }
         try:
             self._upload_snapshot()
