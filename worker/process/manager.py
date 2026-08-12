@@ -247,5 +247,17 @@ class ProcessManager:
         threading.Thread(target=self.monitor_loop, daemon=True).start()
         logger.info("[process] 监控已启动")
 
+
+    def _check_tunnels(self):
+        """检查隧道崩溃并重启"""
+        with self._lock:
+            names = list(self.known.keys())
+        for name in names:
+            with self._lock:
+                entry = self.known.get(name)
+            if not entry:
+                continue
+            tunnels.check_and_restart(entry, name)
+
     def shutdown(self):
         self._stop.set()
