@@ -60,6 +60,10 @@ def _report_running():
                 s3_summary = state.s3pool.get_health()
                 s3_summary.pop("ready", None)
                 s3_summary.pop("total", None)
+                _st = state.s3pool.get_status()
+                s3_summary["a_ops"] = _st.get("total_a_ops", 0)
+                s3_summary["b_ops"] = _st.get("total_b_ops", 0)
+                s3_summary["storage_mb"] = _st.get("total_storage_mb", 0)
             # 收集进程数
             proc_count = 0
             if state.proc_mgr:

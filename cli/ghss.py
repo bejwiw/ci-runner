@@ -11,7 +11,7 @@ ghbox CLI 客户端入口
 JSON 模式操作：
   instances / create / close <id> / accounts /
   add-account <name> <token> / tasks / logs [limit] /
-  s3-status / overview / processes <inst_id> /
+  s3-status / s3-workers / overview / processes <inst_id> /
   snapshot <inst_id> / backup <inst_id> /
   exec <inst_id> <cmd> / health <inst_id>
   attack/start <inst_id> <target> [type] [port] [duration]
@@ -117,6 +117,8 @@ def json_mode(args):
         print(json_dumps(api.get("/api/s3/health")))
     elif op == "s3-accounts":
         print(json_dumps(api.get("/api/s3/accounts")))
+    elif op == "s3-workers":
+        print(json_dumps(api.get("/api/s3/workers")))
     elif op == "logs-proxy" and len(args) > 1:
         print(json_dumps(api.get(f"/api/instances/{args[1]}/logs?limit=50")))
     elif op == "processes-proxy" and len(args) > 1:

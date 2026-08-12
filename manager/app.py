@@ -135,9 +135,53 @@ def logs():
 @app.route("/api/s3/status")
 @require_auth
 def s3_status():
-    if state.s3pool:
-        return jsonify(ok=True, **state.s3pool.get_status())
-    return jsonify(ok=False, error="S3 未初始化"), 503
+    if not state.s3pool:
+        return jsonify(ok=False, error="S3 未初始化"), 503
+    mgr = state.s3pool.get_status()
+    w_a = sum(hb.get("a_ops", 0) for hb in state.worker_heartbeats.values())
+    w_b = sum(hb.get("b_ops", 0) for hb in state.worker_heartbeats.values())
+    w_st = sum(hb.get("storage_mb", 0) for hb in state.worker_heartbeats.values())
+    w_cnt = len(state.worker_heartbeats)
+    return jsonify(ok=True,
+        ready=mgr.get("ready", False),
+        total_accounts=mgr.get("total_accounts", 0),
+        active_accounts=mgr.get("active_accounts", 0),
+        degraded_accounts=mgr.get("degraded_accounts", 0),
+        unavailable_accounts=mgr.get("unavailable_accounts", 0),
+        total_a_ops=mgr.get("total_a_ops", 0) + w_a,
+        total_b_ops=mgr.get("total_b_ops", 0) + w_b,
+        total_storage_mb=round(mgr.get("total_storage_mb", 0) + w_st, 1),
+        hash_ring_size=mgr.get("hash_ring_size", 0),
+        manager_a_ops=mgr.get("total_a_ops", 0),
+        manager_b_ops=mgr.get("total_b_ops", 0),
+        manager_storage_mb=mgr.get("total_storage_mb", 0),
+        worker_count=w_cnt,
+        worker_a_ops=w_a,
+        worker_b_ops=w_b,
+        worker_storage_mb=round(w_st, 1),
+    )
+
+
+@app.route("/api/s3/workers")
+@require_auth
+def s3_workers():
+    """查看每个worker的S3状态"""
+    result = []
+    for inst_id, hb in state.worker_heartbeats.items():
+        s3 = hb.get("s3", {})
+        result.append({
+            "instance": inst_id,
+            "last_seen": hb.get("last_seen", 0),
+            "active": s3.get("active", 0),
+            "degraded": s3.get("degraded", 0),
+            "unavailable": s3.get("unavailable", 0),
+            "a_ops": s3.get("a_ops", 0),
+            "b_ops": s3.get("b_ops", 0),
+            "storage_mb": s3.get("storage_mb", 0),
+            "procs": hb.get("procs", 0),
+            "disk_pct": hb.get("disk_pct", 0),
+        })
+    return jsonify(ok=True, workers=result, total=len(result))
 
 
 # ==================== Worker 心跳 ====================
@@ -148,13 +192,17 @@ def worker_heartbeat():
     d = request.get_json(silent=True) or {}
     inst_id = d.get("inst_id", "")
     if inst_id:
+        _s3 = d.get("s3", {})
         state.worker_heartbeats[inst_id] = {
             "job_id": d.get("job_id", ""),
             "last_seen": time.time(),
             "version": d.get("version", "unknown"),
-            "s3": d.get("s3", {}),
+            "s3": _s3,
             "procs": d.get("procs", 0),
             "disk_pct": d.get("disk_pct", 0),
+            "a_ops": _s3.get("a_ops", 0),
+            "b_ops": _s3.get("b_ops", 0),
+            "storage_mb": _s3.get("storage_mb", 0),
         }
     return jsonify(ok=True)
 

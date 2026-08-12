@@ -182,18 +182,25 @@ def overview():
 def s3_status():
     d = api.get("/api/s3/status")
     if not d.get("ok"):
-        print(f"  {d.get('error')}")
+        print(f"  错误: {d.get('error', '未知')}")
         return
     print(f"  就绪: {d.get('ready')}")
-    print(f"  总账号: {d.get('total_accounts')}")
-    print(f"  活跃账号: {d.get('active_accounts')}")
-    print(f"  路由条目: {d.get('routing_entries')}")
-    print(f"  A类操作: {d.get('total_a_ops')}")
-    print(f"  B类操作: {d.get('total_b_ops')}")
-    print(f"  存储用量: {d.get('total_storage_mb')}MB")
+    print(f"  总账号: {d.get('total_accounts', 0)}")
+    print(f"  活跃账号: {d.get('active_accounts', 0)}")
+    print(f"  降级账号: {d.get('degraded_accounts', 0)}")
+    print(f"  不可用账号: {d.get('unavailable_accounts', 0)}")
+    print(f"  哈希环: {d.get('hash_ring_size', 0)}")
+    print(f"  --- 全局统计 ---")
+    print(f"  A类操作: {d.get('total_a_ops', 0)}")
+    print(f"  B类操作: {d.get('total_b_ops', 0)}")
+    print(f"  存储用量: {d.get('total_storage_mb', 0)}MB")
+    print(f"  --- 来源拆分 ---")
+    print(f"  Manager: A={d.get('manager_a_ops', 0)} B={d.get('manager_b_ops', 0)} 存储={d.get('manager_storage_mb', 0)}MB")
+    w_cnt = d.get("worker_count", 0)
+    if w_cnt:
+        print(f"  Worker×{w_cnt}: A={d.get('worker_a_ops', 0)} B={d.get('worker_b_ops', 0)} 存储={d.get('worker_storage_mb', 0)}MB")
 
 
-# ==================== 实例操作（进程/备份/exec） ====================
 
 def list_processes():
     inst = pick_instance()
@@ -461,3 +468,19 @@ def proxy_resource():
     print(f"  内存: {d.get('mem_avail_kb', 0) // 1024}MB 可用 / {d.get('mem_total_kb', 0) // 1024}MB")
     print(f"  磁盘: {d.get('disk_used_kb', 0) // 1024}MB / {d.get('disk_total_kb', 0) // 1024}MB ({d.get('disk_use_pct', 0)}%)")
     print(f"  运行: {d.get('elapsed', 0)}s")
+
+def s3_workers():
+    """查看每个worker的S3状态"""
+    d = api.get("/api/s3/workers")
+    if not d.get("ok"):
+        print(f"  错误: {d.get('error', '未知')}")
+        return
+    workers = d.get("workers", [])
+    print(f"  Worker S3状态 ({d.get('total', 0)}个):\n")
+    for w in workers:
+        import time as _t
+        seen = _t.strftime("%H:%M:%S", _t.localtime(w.get("last_seen", 0)))
+        print(f"  {w['instance']}:")
+        print(f"    S3: active={w.get('active',0)} degraded={w.get('degraded',0)} unavailable={w.get('unavailable',0)}")
+        print(f"    操作: A={w.get('a_ops',0)} B={w.get('b_ops',0)} 存储={w.get('storage_mb',0)}MB")
+        print(f"    进程: {w.get('procs',0)} 磁盘: {w.get('disk_pct',0)}% 最后上报: {seen}\n")
