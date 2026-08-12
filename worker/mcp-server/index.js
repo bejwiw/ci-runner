@@ -10,7 +10,7 @@ import {
 import { resolve, extname, basename, dirname, join } from "path";
 import { WebSocketServer } from "ws";
 import pty from "node-pty";
-import { chromium } from "playwright";
+import { launch } from "cloakbrowser";
 import crypto from "crypto";
 
 // ============ 配置管理 ============
@@ -650,7 +650,7 @@ async function launchBrowser() {
   let retries = 3;
   while (retries > 0) {
     try {
-      browser = await chromium.launch({
+      browser = await launch({
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
       });
