@@ -54,12 +54,35 @@ class McpManager:
         return True
 
     def ensure_server(self):
-        """确保 MCP 服务代码和依赖可用"""
+        """确保 MCP 服务代码和依赖可用（每次检查代码是否最新）"""
         node_modules = os.path.join(MCP_SERVER_DIR, "node_modules")
         index_js = os.path.join(MCP_SERVER_DIR, "index.js")
-        if os.path.isdir(node_modules) and os.path.exists(index_js):
-            return True
+        pkg_path = os.path.join(MCP_SERVER_DIR, "package.json")
+        # 读取旧package.json
+        old_pkg = ""
+        if os.path.exists(pkg_path):
+            try:
+                with open(pkg_path) as f:
+                    old_pkg = f.read()
+            except Exception:
+                pass
+        # 每次复制最新代码（幂等）
         self._copy_server_code()
+        # 比较package.json是否变了
+        new_pkg = ""
+        if os.path.exists(pkg_path):
+            try:
+                with open(pkg_path) as f:
+                    new_pkg = f.read()
+            except Exception:
+                pass
+        pkg_changed = old_pkg != new_pkg
+        if pkg_changed and os.path.isdir(node_modules):
+            # package.json变了，删除旧node_modules强制重装
+            shutil.rmtree(node_modules, ignore_errors=True)
+            logger.info("[mcp] package.json 变更，重新安装依赖")
+        if os.path.isdir(node_modules) and os.path.exists(index_js) and not pkg_changed:
+            return True
         # 尝试从 Releases 下载预编译依赖
         try:
             blob = releases.download_chunked("mcp-deps.tar.gz.enc",
