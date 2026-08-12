@@ -2,8 +2,8 @@
 """
 进程配置读写
 
-修复旧项目 bug：_SKIP_ENV 增加了 S3_*/DECRYPT_KEY 等敏感变量，
-防止凭证泄露到 ghvps.json。
+build_config: 如果ghvps.json中的cwd与进程实际cwd不一致，
+自动修复为进程实际cwd并回写ghvps.json。
 """
 import os
 import json
@@ -29,7 +29,7 @@ def manifest_path():
     return os.path.join(config.PROC_DIR, "manifest.json")
 
 
-# 排除的敏感/易变环境变量（修复：增加 S3_*/DECRYPT_KEY 等）
+# 排除的敏感/易变环境变量
 _SKIP_ENV = (
     "PATH", "HOME", "USER", "SHELL", "PWD", "_", "SHLVL", "LANG", "LC_ALL",
     "TERM", "OLDPWD", "GITHUB_", "RUNNER_", "ACTIONS_", "CI", "GH_TOKEN",
@@ -42,7 +42,6 @@ _SKIP_ENV = (
     "PROC_SCAN_INTERVAL", "DISK_", "SESSION_TTL",
     "GHBOX_JOB_ID", "LOG_LEVEL", "S3_ACCOUNTS_FILE",
 )
-# 以 "_" 结尾的是前缀匹配（如 "S3_" 匹配 S3_ACCESS_KEY 等）
 _PREFIX_ENV = tuple(e for e in _SKIP_ENV if e.endswith("_"))
 _EXACT_ENV = tuple(e for e in _SKIP_ENV if not e.endswith("_"))
 
@@ -71,17 +70,20 @@ def read_env(pid):
 
 
 def build_config(info):
+    """从进程信息构建配置。如果ghvps.json的cwd过时，自动修复。"""
     cwd = info.cwd
     cfg = None
+    ghvps_path = None
     if cwd and os.path.isdir(cwd):
-        user_cfg = os.path.join(cwd, "ghvps.json")
-        if os.path.exists(user_cfg):
+        ghvps_path = os.path.join(cwd, "ghvps.json")
+        if os.path.exists(ghvps_path):
             try:
-                with open(user_cfg) as f:
+                with open(ghvps_path) as f:
                     cfg = json.load(f)
             except Exception:
                 cfg = None
     if cfg is None:
+        # 没有ghvps.json，自动生成
         cfg = {
             "name": info.name,
             "command": info.cmdline_str(),
@@ -93,20 +95,38 @@ def build_config(info):
             "restart_delay": 3,
         }
     else:
+        # 有ghvps.json，补全缺失字段
         cfg.setdefault("name", info.name)
         cfg.setdefault("command", info.cmdline_str())
-        cfg.setdefault("cwd", cwd or os.path.expanduser("~"))
         cfg.setdefault("env", read_env(info.pid))
         cfg.setdefault("install", [])
         cfg.setdefault("exclude", list(DEFAULT_EXCLUDE))
         cfg.setdefault("auto_restart", True)
         cfg.setdefault("restart_delay", 3)
+
+        # 核心：cwd自动修复
+        # 如果ghvps.json中的cwd和进程实际cwd不一致，
+        # 说明目录迁移了（如/home/runner/files→/home/kodebite），
+        # 自动修复ghvps.json中的cwd为进程实际cwd
+        old_cwd = cfg.get("cwd", "")
+        if cwd and old_cwd != cwd:
+            cfg["cwd"] = cwd
+            # 回写修复后的ghvps.json到进程cwd下
+            if ghvps_path:
+                try:
+                    with open(ghvps_path, "w") as f:
+                        json.dump(cfg, f, indent=2, ensure_ascii=False)
+                    logger.info(f"[config] {cfg.get('name')} cwd自动修复: {old_cwd} -> {cwd}")
+                except Exception as e:
+                    logger.warning(f"[config] {cfg.get('name')} ghvps.json回写失败: {e}")
+
     cfg["source_pid"] = info.pid
     cfg["saved_at"] = time.time()
     return cfg
 
 
 def save_proc_config(cfg):
+    """保存配置到processes/<name>/ghvps.json"""
     try:
         d = os.path.join(proc_dir(), cfg["name"])
         os.makedirs(d, exist_ok=True)
@@ -119,6 +139,7 @@ def save_proc_config(cfg):
 
 
 def load_proc_config(name):
+    """从processes/<name>/ghvps.json读取配置"""
     path = proc_config_path(name)
     if os.path.exists(path):
         try:
@@ -130,6 +151,7 @@ def load_proc_config(name):
 
 
 def save_manifest(processes, reason="periodic"):
+    """保存进程清单"""
     manifest = {
         "version": 2,
         "saved_at": time.time(),
@@ -146,6 +168,7 @@ def save_manifest(processes, reason="periodic"):
 
 
 def load_manifest():
+    """读取进程清单"""
     path = manifest_path()
     if not os.path.exists(path):
         return {}

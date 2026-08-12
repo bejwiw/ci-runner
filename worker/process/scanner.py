@@ -2,8 +2,12 @@
 """
 进程扫描与识别
 
-修复旧项目 bug：排除 MCP 进程不再按 "node"+"index.js" 命令名，
-改为按 cwd 在 mcp-server 目录下判断，避免误杀用户的其他 node 项目。
+排除规则：
+- 系统进程（SYSTEM_BLACKLIST）
+- worker自身（SELF_ENTRIES）
+- cloudflared（由tunnels字段管理）
+- MCP服务（cwd在mcp-server目录下）
+- 终端bash会话（bash只有自身参数没有脚本/命令）
 """
 import os
 import pwd
@@ -119,7 +123,10 @@ def find_self_worker_pids():
 
 
 def is_system(info, worker_pids):
+    """判断是否为系统进程（应该排除）"""
     cmd = info.cmdline_str().lower()
+    if not cmd:
+        return True
     if cmd.startswith("["):
         return True
     for entry in SELF_ENTRIES:
@@ -132,14 +139,21 @@ def is_system(info, worker_pids):
         return True
     if "attacker" in cmd:
         return True
-    # 修复：MCP 排除改为 cwd 判断（不按 "node"+"index.js" 命令名）
+    # MCP服务按cwd判断
     if info.cwd and "mcp-server" in info.cwd:
         return True
+    # 排除终端bash会话（bash只有自身参数，没有脚本/命令）
+    # 如 "bash --norc --noprofile" 是终端会话，不是服务
+    # 但 "bash run.sh" 有脚本，不排除
+    if info.cmdline and info.cmdline[0] == "bash":
+        has_script = any(not a.startswith("-") for a in info.cmdline[1:])
+        if not has_script:
+            return True
     return False
 
 
 def scan_user_processes():
-    """扫描用户进程（仅保留 cwd 在 ~/files 下的）"""
+    """扫描用户进程（仅保留cwd在FILES_DIR下的）"""
     import config as _config
     worker_pids = find_self_worker_pids()
     files_dir = os.path.realpath(os.path.expanduser(_config.FILES_DIR))
