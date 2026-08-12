@@ -106,13 +106,22 @@ class McpManager:
             if r.returncode == 0:
                 logger.info("[mcp] npm install 完成")
                 # 安装 Playwright 浏览器
-                browser_cache = os.path.expanduser("~/.cache/ms-playwright/")
-                if not os.path.isdir(browser_cache) or not os.listdir(browser_cache):
-                    logger.info("[mcp] 安装 Playwright Chromium...")
+                cloak_cache = os.path.expanduser("~/.cloakbrowser/")
+                if not os.path.isdir(cloak_cache) or not os.listdir(cloak_cache):
+                    logger.info("[mcp] 安装 CloakBrowser 二进制...")
                     subprocess.run(
-                        ["sudo", "-E", "npx", "playwright", "install", "chromium", "--with-deps"],
+                        ["sudo", "-E", "npx", "cloakbrowser", "install"],
+                        cwd=MCP_SERVER_DIR, capture_output=True, text=True, timeout=600)
+                    logger.info("[mcp] 安装系统依赖...")
+                    subprocess.run(
+                        ["sudo", "-E", "npx", "playwright-core", "install-deps", "chromium"],
                         cwd=MCP_SERVER_DIR, capture_output=True, text=True, timeout=300)
-                    logger.info("[mcp] Playwright 浏览器安装完成")
+                    logger.info("[mcp] CloakBrowser 安装完成")
+                    # Bug2修复：chmod让chrome GPU子进程能访问二进制目录
+                    if os.path.isdir(cloak_cache):
+                        subprocess.run(["sudo", "chmod", "-R", "755", cloak_cache], timeout=10)
+                        subprocess.run(["sudo", "chmod", "755", os.path.expanduser("~")], timeout=10)
+                        logger.info("[mcp] CloakBrowser 权限已修复")
                 return os.path.isdir(node_modules)
             logger.error(f"[mcp] npm install 失败: {r.stderr[:300]}")
         except subprocess.TimeoutExpired:
