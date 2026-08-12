@@ -19,6 +19,8 @@ import log
 from core import crypto, releases
 from core.s3 import S3Pool
 
+TMP_DIR = os.path.join(os.path.expanduser("~"), ".backup_tmp")
+
 logger = log.setup_logger("persistence")
 
 _db_conn = None
