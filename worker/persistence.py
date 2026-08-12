@@ -129,6 +129,7 @@ def load_or_create(inst_cfg):
 
     # 文件
     tmp_files = os.path.join(TMP_DIR, "restore_files.tar.gz")
+    os.makedirs(TMP_DIR, exist_ok=True)
     files_ok = False
     if _s3pool and _s3pool.is_ready():
         try:
