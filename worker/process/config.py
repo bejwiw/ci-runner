@@ -17,6 +17,16 @@ logger = log.setup_logger("proc.config")
 DEFAULT_EXCLUDE = config.PROC_BACKUP_EXCLUDE
 
 
+def is_bash_session(cfg):
+    """判断是否是bash终端会话（应该排除，不是服务进程）"""
+    cmd = (cfg or {}).get("command", "")
+    if not cmd or not cmd.startswith("bash"):
+        return False
+    parts = cmd.split()
+    has_script = any(not p.startswith("-") for p in parts[1:])
+    return not has_script
+
+
 def proc_dir():
     return config.PROC_DIR
 

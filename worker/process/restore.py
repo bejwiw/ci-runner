@@ -138,7 +138,11 @@ def restore_all():
             for dname in os.listdir(proc_dir):
                 if dname == "manifest.json":
                     continue
-                if os.path.exists(os.path.join(proc_dir, dname, "ghvps.json")):
+                ghvps_path = os.path.join(proc_dir, dname, "ghvps.json")
+                if os.path.exists(ghvps_path):
+                    cfg_check = pconfig.load_proc_config(dname) or {}
+                    if pconfig.is_bash_session(cfg_check):
+                        continue
                     procs[dname] = {}
         if not procs:
             return 0, 0
