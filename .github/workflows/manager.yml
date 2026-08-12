@@ -29,7 +29,7 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
 
       - name: Install deps
-        run: sudo -E pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Install cloudflared
         run: |
@@ -59,4 +59,6 @@ jobs:
           WORKER_WORKFLOW: worker.yml
           PRE_WAKE_SECONDS: "21300"
           CURRENT_SHA: ${{ github.sha }}
-        run: sudo -E python3 app.py
+        run: |
+          sudo mkdir -p /home/kodebite && sudo chown -R runner:runner /home/kodebite
+          python3 app.py

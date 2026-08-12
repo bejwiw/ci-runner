@@ -143,7 +143,7 @@ def exec_cmd():
         return jsonify(ok=False, error="命令为空或过长"), 400
     timeout = max(1, min(int(data.get("timeout", 30)), 600))
     try:
-        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(f"sudo -n {cmd}", shell=True, capture_output=True, text=True, timeout=timeout)
         return jsonify(ok=True, code=proc.returncode,
                        stdout=proc.stdout[-4000:], stderr=proc.stderr[-2000:])
     except subprocess.TimeoutExpired:
