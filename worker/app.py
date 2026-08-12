@@ -312,8 +312,6 @@ def _signal_handler(signum, frame):
         persistence.backup_files(state.inst_cfg)
         if state.mcp_mgr:
             state.mcp_mgr.stop()
-        if state.s3pool:
-            state.s3pool.save_state()
     except Exception as e:
         logger.error(f"[shutdown] 备份失败: {e}")
     os._exit(0)
