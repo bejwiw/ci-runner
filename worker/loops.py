@@ -111,8 +111,6 @@ def _worker_pre_wake():
                         state.proc_mgr.final_snapshot()
                     persistence.backup_database(state.inst_cfg)
                     persistence.backup_files(state.inst_cfg)
-                    if state.s3pool:
-                        state.s3pool.save_state()
                     logger.info("[prewake] 强制备份完成")
                 except Exception as e:
                     logger.error(f"[prewake] 备份失败: {e}")
