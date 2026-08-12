@@ -127,6 +127,7 @@ def snapshot(reason="periodic"):
     """扫描并备份所有用户进程"""
     from worker.process import scanner
     procs = scanner.scan_user_processes()
+    logger.info(f"[snapshot] scanner扫到{len(procs)}个进程: {[(p.name, p.pid, p.cwd) for p in procs]}")
     if not procs:
         return 0, {}
     saved = 0
