@@ -198,6 +198,20 @@ class ProcessManager:
                 entry = self.known.get(name, {})
                 pid = entry.get("pid")
             running = bool(pid and utils.is_alive(pid))
+            # known没有PID时实时扫描/proc
+            if not running:
+                cmd = cfg.get("command") or ""
+                if cmd:
+                    for proc in scanner.scan_user_processes():
+                        if proc.cmdline_str() == cmd:
+                            pid = proc.pid
+                            running = True
+                            with self._lock:
+                                if name not in self.known:
+                                    self.known[name] = {}
+                                self.known[name]["pid"] = pid
+                                self.known[name]["config"] = cfg
+                            break
             item = {
                 "name": name,
                 "cmdline": meta.get("cmdline", cfg.get("command", "")),
