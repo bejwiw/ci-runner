@@ -126,16 +126,25 @@ def load_or_create(inst_cfg):
         create_new_db()
 
     # 文件
-    files_data = None
+    tmp_files = os.path.join(config.FILES_DIR, ".restore_files.tar.gz")
+    files_ok = False
     if _s3pool and _s3pool.is_ready():
         try:
-            files_data = _s3pool.get(files_key)
+            files_ok = _s3pool.get_to_file(files_key, tmp_files)
         except Exception as e:
             logger.warning(f"[persist] S3 文件读取失败: {e}")
-    if files_data is None:
+    if not files_ok:
         files_data = releases.download_chunked(files_asset)
-    if files_data:
-        restore_files_from_bytes(files_data)
+        if files_data:
+            with open(tmp_files, "wb") as f:
+                f.write(files_data)
+            files_ok = True
+    if files_ok:
+        restore_files_from_file(tmp_files)
+    try:
+        os.remove(tmp_files)
+    except Exception:
+        pass
 
     os.makedirs(config.FILES_DIR, exist_ok=True)
     return status_msg
@@ -166,23 +175,69 @@ def backup_database(inst_cfg=None):
 
 
 def backup_files(inst_cfg=None):
-    """备份 ~/files。S3 优先，Releases 降级。"""
+    """备份 ~/files。tar写磁盘+S3分片上传+Releases双写。"""
     inst_id = inst_cfg.instance_id if inst_cfg else "global"
     files_key = f"inst-files/{inst_id}/files.tar.gz"
     files_asset = inst_cfg.asset_files if inst_cfg else config.ASSET_FILES
-    data = backup_files_to_bytes()
-    if not data:
+    # tar写磁盘（避免内存爆炸）
+    tmp = backup_files_to_disk()
+    if not tmp:
         return None
-    # S3（不加密，双写）
+    file_size = os.path.getsize(tmp)
+    # S3（分片上传，不经过内存）
     if _s3pool and _s3pool.is_ready():
-        _s3pool.put(files_key, data)
-        logger.info(f"[backup] 文件 → S3 ({len(data)} 字节)")
-    # Releases（upload_chunked内部自动加密，始终双写）
-    size, parts = releases.upload_chunked(files_asset, data)
-    logger.info(f"[backup] 文件 → Releases ({size} 字节)")
+        _s3pool.put_file(files_key, tmp)
+        logger.info(f"[backup] 文件 → S3 ({file_size} 字节)")
+    # Releases（<50MB双写，>=50MB跳过避免GitHub API超限）
+    if file_size < 50 * 1024 * 1024:
+        with open(tmp, "rb") as f:
+            data = f.read()
+        size, parts = releases.upload_chunked(files_asset, data)
+        logger.info(f"[backup] 文件 → Releases ({size} 字节)")
+    else:
+        logger.info(f"[backup] 文件 >=50MB, 跳过Releases(S3分片存储)")
+        size, parts = file_size, 1
+    # 清理临时文件
+    try:
+        os.remove(tmp)
+    except Exception:
+        pass
     return size, parts
-    logger.info(f"[backup] 文件 → Releases ({size} 字节, {parts} 分片)")
-    return size, parts
+
+
+def backup_files_to_disk():
+    """tar写磁盘临时文件（避免内存爆炸）"""
+    tmp = os.path.join(config.FILES_DIR, ".backup_files.tar.gz")
+    try:
+        result = subprocess.run(
+            ["tar", "czf", tmp, "-C", os.path.expanduser("~"), "files"],
+            capture_output=True, timeout=300)
+        if result.returncode != 0:
+            logger.error(f"[persist] 文件打包失败: {result.stderr.decode(errors='replace')[:200]}")
+            return None
+        return tmp
+    except Exception as e:
+        logger.error(f"[persist] 文件打包异常: {e}")
+        return None
+
+
+def restore_files_from_file(file_path):
+    """从磁盘文件解包"""
+    try:
+        result = subprocess.run(
+            ["tar", "xzf", file_path, "-C", os.path.expanduser("~")],
+            capture_output=True, timeout=300)
+        if result.returncode != 0:
+            logger.error(f"[persist] 文件解压失败: {result.stderr.decode(errors='replace')[:200]}")
+            return False
+        os.makedirs(config.FILES_DIR, exist_ok=True)
+        subprocess.run(["sudo", "rm", "-rf", config.PROC_DIR], timeout=30)
+        os.makedirs(config.PROC_DIR, exist_ok=True)
+        logger.info(f"[persist] 文件恢复完成")
+        return True
+    except Exception as e:
+        logger.error(f"[persist] 文件恢复失败: {e}")
+        return False
 
 
 def save_prev_backup(inst_cfg=None):

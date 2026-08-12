@@ -46,51 +46,70 @@ class ProcessManager:
         return saved
 
     def _upload_snapshot(self):
-        """上传进程快照。S3 优先，Releases 降级。"""
+        """上传进程快照。S3 分片优先，Releases 降级。"""
         if not self.inst_cfg:
             return
         from core import releases
-        data = pbackup.pack_processes_tar()
-        if not data:
-            return
+        import os
         inst_id = self.inst_cfg.instance_id
         key = f"inst-proc/{inst_id}/proc.tar.gz"
-        # S3
+        tmp = pbackup.pack_processes_to_disk()
+        if not tmp:
+            return
+        file_size = os.path.getsize(tmp)
+        # S3（分片上传）
         if self.s3pool and self.s3pool.is_ready():
             try:
-                if self.s3pool.put(key, data):
-                    logger.info(f"[process] 快照已存入 S3 ({len(data)} 字节)")
-                    return
+                self.s3pool.put_file(key, tmp)
+                logger.info(f"[process] 快照已存入 S3 ({file_size} 字节)")
             except Exception as e:
                 logger.warning(f"[process] S3 快照失败: {e}")
-        # Releases 降级
-        asset = f"inst-{inst_id}.processes.tar.gz.enc"
-        releases.upload_chunked(asset, data)
-        logger.info(f"[process] 快照已存入 Releases ({len(data)} 字节)")
+        # Releases（<50MB双写）
+        if file_size < 50 * 1024 * 1024:
+            with open(tmp, "rb") as f:
+                data = f.read()
+            asset = f"inst-{inst_id}.processes.tar.gz.enc"
+            releases.upload_chunked(asset, data)
+            logger.info(f"[process] 快照已存入 Releases ({file_size} 字节)")
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
 
     def _download_snapshot(self):
-        """下载进程快照。S3 优先，Releases 降级。"""
+        """下载进程快照。S3 分片优先，Releases 降级。"""
         if not self.inst_cfg:
             return
         from core import releases
+        import os
         inst_id = self.inst_cfg.instance_id
         key = f"inst-proc/{inst_id}/proc.tar.gz"
-        # S3
+        tmp = os.path.join(config.FILES_DIR, ".proc_restore.tar.gz")
+        # S3（分片下载到磁盘）
         if self.s3pool and self.s3pool.is_ready():
             try:
-                raw = self.s3pool.get(key)
-                if raw:
-                    pbackup.unpack_processes_tar(raw)
-                    logger.info(f"[process] 快照从 S3 恢复 ({len(raw)} 字节)")
+                if self.s3pool.get_to_file(key, tmp):
+                    pbackup.unpack_processes_from_file(tmp)
+                    logger.info(f"[process] 快照从 S3 恢复")
+                    try:
+                        os.remove(tmp)
+                    except Exception:
+                        pass
                     return
             except Exception as e:
                 logger.warning(f"[process] S3 快照下载失败: {e}")
-        # Releases
+        # Releases 降级
         asset = f"inst-{inst_id}.processes.tar.gz.enc"
         data = releases.download_chunked(asset)
         if data:
-            pbackup.unpack_processes_tar(data)
-            logger.info(f"[process] 快照从 Releases 恢复 ({len(data)} 字节)")
+            with open(tmp, "wb") as f:
+                f.write(data)
+            pbackup.unpack_processes_from_file(tmp)
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+            logger.info(f"[process] 快照从 Releases 恢复")
 
     def final_snapshot(self):
         logger.info("[process] 最终快照")

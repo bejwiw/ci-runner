@@ -156,3 +156,28 @@ def snapshot(reason="periodic"):
     pconfig.save_manifest(processes_meta, reason=reason)
     logger.info(f"[snapshot] {saved} 个进程持久化（{reason}）")
     return saved, processes_meta
+
+
+def pack_processes_to_disk():
+    """打包processes目录到磁盘文件"""
+    if not os.path.isdir(pconfig.proc_dir()):
+        return None
+    tmp = os.path.join(config.FILES_DIR, ".proc_backup.tar.gz")
+    with tarfile.open(tmp, "w:gz") as tar:
+        tar.add(pconfig.proc_dir(), arcname="processes")
+    return tmp
+
+
+def unpack_processes_from_file(file_path):
+    """从磁盘文件解包"""
+    try:
+        with tarfile.open(file_path, "r:gz") as tar:
+            try:
+                tar.extractall(path=config.FILES_DIR, filter="tar")
+            except TypeError:
+                tar.extractall(path=config.FILES_DIR)
+        logger.info("[backup] 进程快照解包完成(磁盘)")
+        return True
+    except Exception as e:
+        logger.error(f"[backup] 解包失败: {e}")
+        return False

@@ -10,9 +10,11 @@ S3 多账号存储池（Tigris）+ 一致性哈希
 账号状态机：active → degraded(3次失败) → unavailable(5次失败) → 每5分钟探测恢复。
 S3不加密（私有访问），Releases降级存储加密。
 """
+import os
 import json
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import log
 from core.hashring import HashRing
@@ -27,6 +29,9 @@ ACCOUNTS_KEY = "meta/s3-accounts.txt"
 MAX_FALLBACK = 3
 MAX_SCAN = 10
 MAX_RETRIES = 3
+LARGE_FILE_THRESHOLD = 50 * 1024 * 1024  # 50MB以上分片
+CHUNK_SIZE = 10 * 1024 * 1024  # 10MB/块
+CHUNK_CONCURRENCY = 10  # 并发上传/下载线程数
 RECOVERY_INTERVAL = 300
 DEGRADED_THRESHOLD = 3
 UNAVAILABLE_THRESHOLD = 5
@@ -362,6 +367,146 @@ class S3Pool:
                     c["fail_count"] = 0
                     c["month"] = current_month
                     logger.info(f"[s3] 账号{idx} 月度重置")
+
+
+    # ==================== 分片存储（大文件）====================
+    def put_file(self, key, file_path):
+        """从磁盘文件上传。>=50MB分片并发，<50MB直接上传。"""
+        if not self._initialized:
+            return False
+        file_size = os.path.getsize(file_path)
+        if file_size < LARGE_FILE_THRESHOLD:
+            with open(file_path, "rb") as f:
+                data = f.read()
+            return self.put(key, data)
+        return self._put_file_chunked(key, file_path, file_size)
+
+    def _put_file_chunked(self, key, file_path, file_size):
+        """分片并发上传大文件"""
+        num_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
+        logger.info(f"[s3] 分片上传 {key}: {file_size}B -> {num_chunks}块")
+
+        def upload_chunk(idx):
+            offset = idx * CHUNK_SIZE
+            size = min(CHUNK_SIZE, file_size - offset)
+            chunk_key = f"{key}.chunk{idx}"
+            with open(file_path, "rb") as f:
+                f.seek(offset)
+                data = f.read(size)
+            account = self._select_account(chunk_key)
+            if account is None:
+                return idx, None
+            for attempt in range(MAX_RETRIES):
+                try:
+                    if self._get_client(account).put(chunk_key, data):
+                        with self._lock:
+                            self._counters[account]["a_count"] += 1
+                            self._counters[account]["used_bytes"] += len(data)
+                        self._record_success(account)
+                        return idx, account
+                except Exception as e:
+                    self._record_failure(account, e)
+                    account = self._select_account(chunk_key, exclude=[account])
+                    if account is None:
+                        break
+            for _ in range(MAX_FALLBACK):
+                account = self._select_account(chunk_key, exclude=[account] if account else [])
+                if account is None:
+                    break
+                try:
+                    if self._get_client(account).put(chunk_key, data):
+                        with self._lock:
+                            self._counters[account]["a_count"] += 1
+                            self._counters[account]["used_bytes"] += len(data)
+                        self._record_success(account)
+                        return idx, account
+                except Exception as e:
+                    self._record_failure(account, e)
+            return idx, None
+
+        with ThreadPoolExecutor(max_workers=CHUNK_CONCURRENCY) as executor:
+            results = list(executor.map(upload_chunk, range(num_chunks)))
+        for idx, account in results:
+            if account is None:
+                logger.error(f"[s3] 分片{idx}上传失败, {key}整体失败")
+                return False
+        locations = [{"chunk": idx, "account": acct} for idx, acct in results]
+        manifest = json.dumps({
+            "chunks": num_chunks, "chunk_size": CHUNK_SIZE,
+            "total_size": file_size, "locations": locations,
+        }).encode()
+        self.put(f"{key}.manifest", manifest)
+        logger.info(f"[s3] 分片上传完成: {key} ({num_chunks}块)")
+        return True
+
+    def get_to_file(self, key, file_path):
+        """下载到磁盘文件。分片文件并发下载，普通文件直接下载。"""
+        if not self._initialized:
+            return False
+        manifest_data = self.get(f"{key}.manifest")
+        if manifest_data is None:
+            data = self.get(key)
+            if data is None:
+                return False
+            with open(file_path, "wb") as f:
+                f.write(data)
+            return True
+        manifest = json.loads(manifest_data)
+        return self._get_chunked_to_file(key, manifest, file_path)
+
+    def _get_chunked_to_file(self, key, manifest, file_path):
+        """分片并发下载写磁盘"""
+        num_chunks = manifest["chunks"]
+        total_size = manifest["total_size"]
+        chunk_size = manifest["chunk_size"]
+        locations = manifest["locations"]
+        logger.info(f"[s3] 分片下载 {key}: {total_size}B -> {num_chunks}块")
+        with open(file_path, "wb") as f:
+            f.truncate(total_size)
+
+        def download_chunk(loc):
+            idx = loc["chunk"]
+            account = loc["account"]
+            chunk_key = f"{key}.chunk{idx}"
+            if self._counters.get(account, {}).get("status") != "unavailable":
+                try:
+                    data = self._get_client(account).get(chunk_key)
+                    if data is not None:
+                        with self._lock:
+                            self._counters[account]["b_count"] += 1
+                        self._record_success(account)
+                        return idx, data
+                except Exception as e:
+                    self._record_failure(account, e)
+            nearby = self._hash_ring.get_nearby_accounts(chunk_key, MAX_SCAN)
+            for alt in nearby:
+                if alt == account:
+                    continue
+                if self._counters.get(alt, {}).get("status") == "unavailable":
+                    continue
+                try:
+                    data = self._get_client(alt).get(chunk_key)
+                    if data is not None:
+                        with self._lock:
+                            self._counters[alt]["b_count"] += 1
+                        self._record_success(alt)
+                        return idx, data
+                except Exception as e:
+                    self._record_failure(alt, e)
+            return idx, None
+
+        with ThreadPoolExecutor(max_workers=CHUNK_CONCURRENCY) as executor:
+            results = list(executor.map(download_chunk, locations))
+        for idx, data in results:
+            if data is None:
+                logger.error(f"[s3] 分片{idx}下载失败")
+                return False
+            offset = idx * chunk_size
+            with open(file_path, "r+b") as f:
+                f.seek(offset)
+                f.write(data)
+        logger.info(f"[s3] 分片下载完成: {key} ({num_chunks}块)")
+        return True
 
     # ==================== 状态查询 ====================
     def get_status(self):
