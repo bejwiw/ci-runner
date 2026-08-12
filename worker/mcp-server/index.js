@@ -652,7 +652,10 @@ async function launchBrowser() {
     try {
       browser = await launch({
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        humanize: true,
+        timezone: "Asia/Shanghai",
+        locale: "zh-CN"
       });
       const testCtx = await browser.newContext();
       const testPage = await testCtx.newPage();
@@ -701,9 +704,7 @@ async function getPage(sessName) {
   }
 
   const context = await browser.newContext({
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     viewport: { width: 1280, height: 720 },
-    locale: "zh-CN",
     javaScriptEnabled: true,
     ignoreHTTPSErrors: true
   });
