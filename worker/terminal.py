@@ -47,7 +47,7 @@ class Session:
             env["LC_ALL"] = "C.UTF-8"
             env["TERM"] = "xterm-256color"
             env["GHBOX_PERSIST_DIR"] = config.FILES_DIR
-            os.execvpe("sudo", ["sudo", "-i"], env)
+            os.execvpe("bash", ["bash", "-l"], env)
         return pid, fd
 
     def feed(self, data: bytes):

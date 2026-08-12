@@ -84,7 +84,7 @@ class ProcessManager:
         import os
         inst_id = self.inst_cfg.instance_id
         key = f"inst-proc/{inst_id}/proc.tar.gz"
-        tmp = os.path.join(os.path.expanduser("~"), ".backup_tmp", "proc_restore.tar.gz")
+        tmp = os.path.join("/tmp/ghbox_backup", "proc_restore.tar.gz")
         os.makedirs(os.path.dirname(tmp), exist_ok=True)
         # S3（分片下载到磁盘）
         if self.s3pool and self.s3pool.is_ready():

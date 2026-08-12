@@ -82,6 +82,14 @@ class McpManager:
                 cwd=MCP_SERVER_DIR, capture_output=True, text=True, timeout=300)
             if r.returncode == 0:
                 logger.info("[mcp] npm install 完成")
+                # 安装 Playwright 浏览器
+                browser_cache = os.path.expanduser("~/.cache/ms-playwright/")
+                if not os.path.isdir(browser_cache) or not os.listdir(browser_cache):
+                    logger.info("[mcp] 安装 Playwright Chromium...")
+                    subprocess.run(
+                        ["sudo", "-E", "npx", "playwright", "install", "chromium", "--with-deps"],
+                        cwd=MCP_SERVER_DIR, capture_output=True, text=True, timeout=300)
+                    logger.info("[mcp] Playwright 浏览器安装完成")
                 return os.path.isdir(node_modules)
             logger.error(f"[mcp] npm install 失败: {r.stderr[:300]}")
         except subprocess.TimeoutExpired:
@@ -160,7 +168,7 @@ class McpManager:
         os.makedirs(MCP_FILES_DIR, exist_ok=True)
         try:
             self.proc = subprocess.Popen(
-                ["node", "index.js"],
+                ["sudo", "-E", "node", "index.js"],
                 cwd=MCP_SERVER_DIR, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 start_new_session=True)

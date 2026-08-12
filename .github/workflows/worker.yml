@@ -56,4 +56,5 @@ jobs:
           WORKER_WORKFLOW: worker.yml
           CURRENT_SHA: ${{ github.sha }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN || 'kekeke.cc.cd' }}
-        run: python3 app.py
+          FILES_DIR: /home/kodebite
+        run: sudo -E python3 app.py

@@ -54,8 +54,9 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN || 'kekeke.cc.cd' }}
+          FILES_DIR: /home/kodebite
           MANAGER_WORKFLOW: manager.yml
           WORKER_WORKFLOW: worker.yml
           PRE_WAKE_SECONDS: "21300"
           CURRENT_SHA: ${{ github.sha }}
-        run: python3 app.py
+        run: sudo -E python3 app.py

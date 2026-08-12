@@ -19,7 +19,7 @@ import log
 from core import crypto, releases
 from core.s3 import S3Pool
 
-TMP_DIR = os.path.join(os.path.expanduser("~"), ".backup_tmp")
+TMP_DIR = "/tmp/ghbox_backup"
 
 logger = log.setup_logger("persistence")
 
@@ -64,7 +64,7 @@ def backup_files_to_bytes():
     if not os.path.isdir(config.FILES_DIR):
         return None
     result = subprocess.run(
-        ["sudo", "tar", "czf", "-", "-C", os.path.expanduser("~"), "files"],
+        ["sudo", "tar", "czf", "-", "-C", os.path.dirname(config.FILES_DIR), os.path.basename(config.FILES_DIR)],
         capture_output=True, timeout=180)
     if result.returncode != 0:
         logger.error(f"[persist] 文件打包失败: {result.stderr.decode(errors='replace')[:200]}")
@@ -214,7 +214,7 @@ def backup_files_to_disk():
     tmp = os.path.join(TMP_DIR, "backup_files.tar.gz")
     try:
         result = subprocess.run(
-            ["sudo", "tar", "czf", tmp, "-C", os.path.expanduser("~"), "files"],
+            ["sudo", "tar", "czf", tmp, "-C", os.path.dirname(config.FILES_DIR), os.path.basename(config.FILES_DIR)],
             capture_output=True, timeout=300)
         subprocess.run(["sudo", "chown", "runner:runner", tmp], timeout=5)
         if result.returncode != 0:
@@ -230,7 +230,7 @@ def restore_files_from_file(file_path):
     """从磁盘文件解包"""
     try:
         result = subprocess.run(
-            ["sudo", "tar", "xzf", file_path, "-C", os.path.expanduser("~")],
+            ["sudo", "tar", "xzf", file_path, "-C", os.path.dirname(config.FILES_DIR)],
             capture_output=True, timeout=300)
         if result.returncode != 0:
             logger.error(f"[persist] 文件解压失败: {result.stderr.decode(errors='replace')[:200]}")
