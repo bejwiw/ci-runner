@@ -131,7 +131,17 @@ def restore_all():
     """恢复并启动所有持久化进程"""
     procs = pconfig.load_manifest()
     if not procs:
-        return 0, 0
+        # manifest为空，从processes目录扫描ghvps.json
+        import os
+        proc_dir = pconfig.proc_dir()
+        if os.path.isdir(proc_dir):
+            for dname in os.listdir(proc_dir):
+                if dname == "manifest.json":
+                    continue
+                if os.path.exists(os.path.join(proc_dir, dname, "ghvps.json")):
+                    procs[dname] = {}
+        if not procs:
+            return 0, 0
     restored, failed = 0, 0
     for name in procs:
         ok, _ = restore_one(name)
