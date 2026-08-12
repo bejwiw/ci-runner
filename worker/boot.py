@@ -58,6 +58,7 @@ def deferred_init():
         try:
             restored, failed = state.proc_mgr.restore_all()
             logger.info(f"[boot] 进程恢复 {restored} 成功, {failed} 失败 ({time.time()-t0:.1f}s)")
+            state.proc_mgr.snapshot(reason="post_restore")
             state.proc_mgr.start_monitor()
         except Exception as e:
             logger.error(f"[boot] 进程恢复异常: {e}")
