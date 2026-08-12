@@ -204,7 +204,9 @@ class ProcessManager:
             if not running:
                 cmd = cfg.get("command") or ""
                 if cmd:
-                    for proc in scanner.scan_user_processes():
+                    _scanned = scanner.scan_user_processes()
+                    logger.info(f"[list] {name}: known无PID, 实时扫描{len(_scanned)}个进程, cmd={cmd[:40]}")
+                    for proc in _scanned:
                         if proc.cmdline_str() == cmd:
                             pid = proc.pid
                             running = True
