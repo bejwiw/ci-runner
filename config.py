@@ -40,11 +40,11 @@ CF_ZONE_ID = os.environ.get("CF_ZONE_ID", "")
 BASE_DOMAIN = os.environ.get("BASE_DOMAIN", "kekeke.cc.cd")
 
 # ==================== 数据/文件路径 ====================
-DB_FILE = os.path.join(FILES_DIR, "demo.db")
 FILES_DIR = os.environ.get("FILES_DIR", "/home/kodebite")
 PROC_DIR = os.path.join(FILES_DIR, "processes")
 SYSCONFIG_DIR = os.path.join(FILES_DIR, "sysconfig")
 LOGS_DIR = os.path.join(FILES_DIR, "logs")
+DB_FILE = os.path.join(FILES_DIR, "demo.db")
 
 # ==================== 服务 ====================
 PORT = int(os.environ.get("PORT", "8080"))
