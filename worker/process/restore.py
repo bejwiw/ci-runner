@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-进程恢复/启动/停止/重启
+进程恢复/启动/停止（重构版）
 
-修复旧项目 bug：install_deps 超时从 600 秒降到 180 秒。
+核心改变：
+- restore_all()从scan_configs()读取，不依赖manifest
+- install_deps()用sudo -n执行
+- start_process()写PID文件
+- stop_process()从PID文件读PID，删PID文件
+- restore_files()不再迁移cwd，cwd不在FILES_DIR下则跳过
 """
 import os
 import time
@@ -18,20 +23,18 @@ logger = log.setup_logger("proc.restore")
 
 
 def restore_files(cfg):
+    """从processes/<name>/app/复制文件回cwd"""
     name = cfg.get("name", "proc")
     if not cfg.get("files_backed", True):
         return True
     src = os.path.join(pconfig.proc_dir(), name, "app")
     cwd = cfg.get("cwd") or ""
-    if not src or not os.path.isdir(src) or not cwd:
+    if not cwd or not os.path.isdir(src):
         return True
-    # 修正cwd：如果不是FILES_DIR下的路径，迁移到FILES_DIR下
+    # cwd不在FILES_DIR下则跳过（不修复，不报错）
     if not cwd.startswith(config.FILES_DIR):
-        old_basename = os.path.basename(cwd.rstrip("/")) if cwd else name
-        cwd = os.path.join(config.FILES_DIR, old_basename)
-        cfg["cwd"] = cwd
-        pconfig.save_proc_config(cfg)
-        logger.info(f"[restore] {name} cwd 迁移到 {cwd}")
+        logger.warning(f"[restore] {name}: cwd={cwd} 不在{config.FILES_DIR}下，跳过文件恢复")
+        return True
     os.makedirs(cwd, exist_ok=True)
     count = utils.copy_tree(src, cwd, set())
     logger.info(f"[restore] {name} 恢复了 {count} 个文件")
@@ -39,16 +42,19 @@ def restore_files(cfg):
 
 
 def install_deps(cfg):
-    """执行依赖安装（超时 180 秒）"""
+    """执行依赖安装（用sudo -n，超时180秒）"""
     cwd = cfg.get("cwd") or os.path.expanduser("~")
     for cmd in cfg.get("install") or []:
         logger.info(f"[restore] {cfg['name']} 安装: {cmd}")
-        code, out, err = utils.run_cmd(cmd, timeout=180, cwd=cwd)
-        if code != 0:
-            raise RuntimeError(f"安装失败: {err[:200]}")
+        r = subprocess.run(
+            f"sudo -E -n {cmd}", shell=True, capture_output=True, text=True,
+            timeout=180, cwd=cwd, executable="/bin/bash")
+        if r.returncode != 0:
+            raise RuntimeError(f"安装失败: {r.stderr[:200]}")
 
 
 def start_process(name, cfg=None):
+    """启动进程，写PID文件"""
     cfg = cfg or pconfig.load_proc_config(name)
     if not cfg:
         return False, None
@@ -56,22 +62,30 @@ def start_process(name, cfg=None):
     if not command:
         return False, None
     cwd = cfg.get("cwd") or os.path.expanduser("~")
-    env = dict(os.environ)
-    for k, v in (cfg.get("env") or {}).items():
-        env[k] = v
+    if not os.path.isdir(cwd):
+        os.makedirs(cwd, exist_ok=True)
+    # env合并：os.environ + cfg["env"]
+    env = {**os.environ, **(cfg.get("env") or {})}
+    # 日志
+    log_file = cfg.get("log_file") or ""
+    if not log_file:
+        log_file = os.path.join(config.LOGS_DIR, f"{name}.log")
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
     try:
-        _, logpath = log.process_logger(name)
-        logf = open(logpath, "ab")
+        logf = open(log_file, "ab")
     except Exception:
         logf = subprocess.DEVNULL
     try:
         proc = subprocess.Popen(
             command, shell=True, stdout=logf, stderr=subprocess.STDOUT,
             cwd=cwd, env=env, start_new_session=True, executable="/bin/bash")
+        # 写PID文件
+        pconfig.write_pid_file(name, proc.pid)
         logger.info(f"[start] {name} (pid={proc.pid})")
         time.sleep(2)
         if proc.poll() is not None:
             logger.error(f"[start] {name} 立即退出 (exit={proc.returncode})")
+            pconfig.delete_pid_file(name)
             return False, None
         return True, proc.pid
     except Exception as e:
@@ -80,23 +94,20 @@ def start_process(name, cfg=None):
 
 
 def stop_process(name, cfg=None, pid=None):
-    cfg = cfg or pconfig.load_proc_config(name)
-    if not cfg:
-        return False, "无配置"
+    """停止进程，从PID文件读PID，删PID文件"""
     if not pid:
-        pid = cfg.get("source_pid")
+        pid = pconfig.read_pid_file(name)
     if not pid or not utils.is_alive(pid):
+        pconfig.delete_pid_file(name)
         return False, "进程未运行"
     try:
         os.kill(pid, signal.SIGTERM)
         time.sleep(1.5)
         if utils.is_alive(pid):
             os.kill(pid, signal.SIGKILL)
-    except Exception:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except Exception:
-            pass
+    except (ProcessLookupError, PermissionError):
+        pass
+    pconfig.delete_pid_file(name)
     logger.info(f"[stop] {name} (pid={pid})")
     return True, "已停止"
 
@@ -128,27 +139,13 @@ def restore_one(name, cfg=None):
 
 
 def restore_all():
-    """恢复并启动所有持久化进程"""
-    procs = pconfig.load_manifest()
-    if not procs:
-        # manifest为空，从processes目录扫描ghvps.json
-        import os
-        proc_dir = pconfig.proc_dir()
-        if os.path.isdir(proc_dir):
-            for dname in os.listdir(proc_dir):
-                if dname == "manifest.json":
-                    continue
-                ghvps_path = os.path.join(proc_dir, dname, "ghvps.json")
-                if os.path.exists(ghvps_path):
-                    cfg_check = pconfig.load_proc_config(dname) or {}
-                    if pconfig.is_bash_session(cfg_check):
-                        continue
-                    procs[dname] = {}
-        if not procs:
-            return 0, 0
+    """从scan_configs()读取所有ghvps.json，恢复进程"""
+    configs = pconfig.scan_configs()
+    if not configs:
+        return 0, 0
     restored, failed = 0, 0
-    for name in procs:
-        ok, _ = restore_one(name)
+    for name, cfg in configs.items():
+        ok, _ = restore_one(name, cfg)
         if ok:
             restored += 1
         else:

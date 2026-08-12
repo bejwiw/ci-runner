@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-进程文件快照与备份
+进程文件快照与备份（重构版）
 
-- 复制进程 cwd 下项目文件到 processes/<name>/app/
-- 原子替换（先复制到 tmp，完成后替换）
-- 排除可重建目录
-- 打包/解包 processes 目录
+核心改变：snapshot()从scan_configs()读取进程列表，不扫描/proc。
 """
 import os
 import io
@@ -60,6 +57,10 @@ def backup_process_files(cfg):
         for f in files:
             if rel in exclude:
                 continue
+            if f == "ghvps.json":
+                continue  # ghvps.json单独管理
+            if f == "pid":
+                continue  # PID文件不备份
             s = os.path.join(root, f)
             d = os.path.join(tmp_dest, rel, f)
             try:
@@ -97,17 +98,17 @@ def backup_process_files(cfg):
 
 
 def pack_processes_tar():
-    """打包 processes 目录为 gz 字节流"""
+    """打包 processes 目录为 gz 字节流（排除pid文件）"""
     if not os.path.isdir(pconfig.proc_dir()):
         return None
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        tar.add(pconfig.proc_dir(), arcname="processes")
+        tar.add(pconfig.proc_dir(), arcname="processes", filter=lambda info: None if info.name.endswith("/pid") or info.name.endswith("/pid/") else info)
     return buf.getvalue()
 
 
 def unpack_processes_tar(data):
-    """解包到 files 目录（保留权限）"""
+    """解包到 files 目录"""
     if not data:
         return False
     try:
@@ -124,48 +125,42 @@ def unpack_processes_tar(data):
 
 
 def snapshot(reason="periodic"):
-    """扫描并备份所有用户进程"""
-    from worker.process import scanner
-    procs = scanner.scan_user_processes()
-    if not procs:
+    """扫描ghvps.json，备份所有配置的进程（不扫描/proc）"""
+    configs = pconfig.scan_configs()
+    if not configs:
         return 0, {}
     saved = 0
     processes_meta = {}
-    seen_cwds = set()
-    for info in procs:
-        if info.cwd in seen_cwds:
-            continue
-        seen_cwds.add(info.cwd)
+    for name, cfg in configs.items():
         try:
-            cfg = pconfig.build_config(info)
+            pid = pconfig.read_pid_file(name)
             ok, size_mb, cfg = backup_process_files(cfg)
             if ok:
                 saved += 1
-                name = cfg.get("name", info.name)
                 processes_meta[name] = {
                     "name": name,
-                    "pid": info.pid,
-                    "cmdline": info.cmdline_str(),
-                    "cwd": info.cwd,
+                    "pid": pid,
+                    "cmdline": cfg.get("command", ""),
+                    "cwd": cfg.get("cwd", ""),
                     "size_mb": round(size_mb, 2),
                     "files_backed": cfg.get("files_backed", True),
                     "saved_at": cfg.get("saved_at"),
                 }
         except Exception as e:
-            logger.error(f"[snapshot] 备份 {info.name} 失败: {e}")
+            logger.error(f"[snapshot] 备份 {name} 失败: {e}")
     pconfig.save_manifest(processes_meta, reason=reason)
     logger.info(f"[snapshot] {saved} 个进程持久化（{reason}）")
     return saved, processes_meta
 
 
 def pack_processes_to_disk():
-    """打包processes目录到磁盘文件"""
+    """打包processes目录到磁盘文件（排除pid文件）"""
     if not os.path.isdir(pconfig.proc_dir()):
         return None
     tmp = os.path.join("/tmp/ghbox_backup", "proc_backup.tar.gz")
     os.makedirs(os.path.dirname(tmp), exist_ok=True)
     with tarfile.open(tmp, "w:gz") as tar:
-        tar.add(pconfig.proc_dir(), arcname="processes")
+        tar.add(pconfig.proc_dir(), arcname="processes", filter=lambda info: None if info.name.endswith("/pid") or info.name.endswith("/pid/") else info)
     return tmp
 
 

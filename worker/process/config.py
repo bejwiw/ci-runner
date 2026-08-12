@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-进程配置读写
+进程配置读写（重构版）
 
-build_config: 如果ghvps.json中的cwd与进程实际cwd不一致，
-自动修复为进程实际cwd并回写ghvps.json。
+核心改变：不再依赖scanner扫描/proc，改为扫描ghvps.json配置文件。
+scan_configs()是唯一的进程发现入口。
 """
 import os
 import json
@@ -16,15 +16,8 @@ logger = log.setup_logger("proc.config")
 
 DEFAULT_EXCLUDE = config.PROC_BACKUP_EXCLUDE
 
-
-def is_bash_session(cfg):
-    """判断是否是bash终端会话（应该排除，不是服务进程）"""
-    cmd = (cfg or {}).get("command", "")
-    if not cmd or not cmd.startswith("bash"):
-        return False
-    parts = cmd.split()
-    has_script = any(not p.startswith("-") for p in parts[1:])
-    return not has_script
+# 不扫描这些目录
+SKIP_DIRS = {"processes", "logs", "mcp-server", "mcp-files", "sysconfig", "demo.db", ".backup_tmp"}
 
 
 def proc_dir():
@@ -39,104 +32,114 @@ def manifest_path():
     return os.path.join(config.PROC_DIR, "manifest.json")
 
 
-# 排除的敏感/易变环境变量
-_SKIP_ENV = (
-    "PATH", "HOME", "USER", "SHELL", "PWD", "_", "SHLVL", "LANG", "LC_ALL",
-    "TERM", "OLDPWD", "GITHUB_", "RUNNER_", "ACTIONS_", "CI", "GH_TOKEN",
-    "DEMO_KEY", "EXEC_TOKEN", "TUNNEL_TOKEN", "CF_", "AWS_", "AZURE_",
-    "S3_", "DECRYPT_KEY", "MANAGER_HOST", "BASE_DOMAIN",
-    "INSTANCE_ROLE", "INSTANCE_ID", "REPO", "MAIN_REPO",
-    "CURRENT_SHA", "MCP_PORT", "MCP_PREFIX", "FILES_DIR",
-    "PORT", "BACKUP_INTERVAL", "PRE_WAKE_SECONDS",
-    "HEARTBEAT_INTERVAL", "HEARTBEAT_TIMEOUT",
-    "PROC_SCAN_INTERVAL", "DISK_", "SESSION_TTL",
-    "GHBOX_JOB_ID", "LOG_LEVEL", "S3_ACCOUNTS_FILE",
-)
-_PREFIX_ENV = tuple(e for e in _SKIP_ENV if e.endswith("_"))
-_EXACT_ENV = tuple(e for e in _SKIP_ENV if not e.endswith("_"))
+def is_bash_session(cfg):
+    """判断是否是bash终端会话（应该跳过）"""
+    cmd = (cfg or {}).get("command", "")
+    if not cmd or not cmd.startswith("bash"):
+        return False
+    parts = cmd.split()
+    has_script = any(not p.startswith("-") for p in parts[1:])
+    return not has_script
 
 
-def read_env(pid):
-    env = {}
+def pid_file_path(name):
+    """PID文件路径"""
+    return os.path.join(config.PROC_DIR, name, "pid")
+
+
+def write_pid_file(name, pid):
+    """写PID文件"""
     try:
-        with open(f"/proc/{pid}/environ", "rb") as f:
-            data = f.read().split(b"\x00")
-        for item in data:
-            if b"=" not in item:
-                continue
-            k, _, v = item.partition(b"=")
-            k = k.decode(errors="replace")
-            v = v.decode(errors="replace")
-            if not k:
-                continue
-            if k in _EXACT_ENV:
-                continue
-            if any(k.startswith(p) for p in _PREFIX_ENV):
-                continue
-            env[k] = v
+        d = os.path.dirname(pid_file_path(name))
+        os.makedirs(d, exist_ok=True)
+        with open(pid_file_path(name), "w") as f:
+            f.write(str(pid))
+    except Exception as e:
+        logger.warning(f"[config] {name}: 写PID文件失败: {e}")
+
+
+def read_pid_file(name):
+    """读PID文件"""
+    try:
+        with open(pid_file_path(name)) as f:
+            return int(f.read().strip())
+    except Exception:
+        return None
+
+
+def delete_pid_file(name):
+    """删PID文件"""
+    try:
+        os.remove(pid_file_path(name))
     except Exception:
         pass
-    return env
 
 
-def build_config(info):
-    """从进程信息构建配置。如果ghvps.json的cwd过时，自动修复。"""
-    cwd = info.cwd
-    cfg = None
-    ghvps_path = None
-    if cwd and os.path.isdir(cwd):
-        ghvps_path = os.path.join(cwd, "ghvps.json")
-        if os.path.exists(ghvps_path):
-            try:
-                with open(ghvps_path) as f:
-                    cfg = json.load(f)
-            except Exception:
-                cfg = None
-    if cfg is None:
-        # 没有ghvps.json，自动生成
-        cfg = {
-            "name": info.name,
-            "command": info.cmdline_str(),
-            "cwd": cwd or os.path.expanduser("~"),
-            "env": read_env(info.pid),
-            "install": [],
-            "exclude": list(DEFAULT_EXCLUDE),
-            "auto_restart": True,
-            "restart_delay": 3,
-        }
-    else:
-        # 有ghvps.json，补全缺失字段
-        cfg.setdefault("name", info.name)
-        cfg.setdefault("command", info.cmdline_str())
-        cfg.setdefault("env", read_env(info.pid))
+def scan_configs():
+    """扫描FILES_DIR下所有ghvps.json，返回 {name: cfg}
+
+    这是唯一的进程发现入口。不扫描/proc。
+    """
+    configs = {}
+    base = config.FILES_DIR
+    if not os.path.isdir(base):
+        return configs
+    try:
+        entries = os.listdir(base)
+    except Exception as e:
+        logger.error(f"[config] 扫描 {base} 失败: {e}")
+        return configs
+    for entry in entries:
+        if entry in SKIP_DIRS:
+            continue
+        ghvps_path = os.path.join(base, entry, "ghvps.json")
+        if not os.path.isfile(ghvps_path):
+            continue
+        try:
+            with open(ghvps_path) as f:
+                cfg = json.load(f)
+        except Exception as e:
+            logger.warning(f"[config] {entry}: ghvps.json读取失败: {e}")
+            continue
+        # name验证
+        name = cfg.get("name", "").strip()
+        if not name:
+            name = entry
+            cfg["name"] = name
+        # command验证
+        if not cfg.get("command", "").strip():
+            logger.warning(f"[config] {name}: command为空，跳过")
+            continue
+        # bash终端会话跳过
+        if is_bash_session(cfg):
+            logger.info(f"[config] {name}: bash终端会话，跳过")
+            continue
+        # cwd验证：不在FILES_DIR下则跳过
+        cwd = cfg.get("cwd", "").strip()
+        if not cwd:
+            cwd = os.path.join(base, entry)
+            cfg["cwd"] = cwd
+        if not cwd.startswith(config.FILES_DIR):
+            logger.warning(f"[config] {name}: cwd={cwd} 不在{config.FILES_DIR}下，跳过")
+            continue
+        # name去重
+        if name in configs:
+            logger.warning(f"[config] {name}: 重复配置，跳过")
+            continue
         cfg.setdefault("install", [])
         cfg.setdefault("exclude", list(DEFAULT_EXCLUDE))
         cfg.setdefault("auto_restart", True)
         cfg.setdefault("restart_delay", 3)
-
-        # 核心：cwd自动修复
-        # 如果ghvps.json中的cwd和进程实际cwd不一致，
-        # 说明目录迁移了（如/home/runner/files→/home/kodebite），
-        # 自动修复ghvps.json中的cwd为进程实际cwd
-        old_cwd = cfg.get("cwd", "")
-        if cwd and old_cwd != cwd:
-            cfg["cwd"] = cwd
-            # 回写修复后的ghvps.json到进程cwd下
-            if ghvps_path:
-                try:
-                    with open(ghvps_path, "w") as f:
-                        json.dump(cfg, f, indent=2, ensure_ascii=False)
-                    logger.info(f"[config] {cfg.get('name')} cwd自动修复: {old_cwd} -> {cwd}")
-                except Exception as e:
-                    logger.warning(f"[config] {cfg.get('name')} ghvps.json回写失败: {e}")
-
-    cfg["source_pid"] = info.pid
-    cfg["saved_at"] = time.time()
-    return cfg
+        cfg.setdefault("env", {})
+        cfg.setdefault("tunnels", [])
+        cfg["source_pid"] = 0
+        cfg["saved_at"] = time.time()
+        configs[name] = cfg
+    return configs
 
 
 def save_proc_config(cfg):
-    """保存配置到processes/<name>/ghvps.json"""
+    """保存配置到processes/<name>/ghvps.json（备份用）"""
     try:
         d = os.path.join(proc_dir(), cfg["name"])
         os.makedirs(d, exist_ok=True)
@@ -149,7 +152,7 @@ def save_proc_config(cfg):
 
 
 def load_proc_config(name):
-    """从processes/<name>/ghvps.json读取配置"""
+    """从processes/<name>/ghvps.json读取配置（备份版本）"""
     path = proc_config_path(name)
     if os.path.exists(path):
         try:
@@ -161,9 +164,9 @@ def load_proc_config(name):
 
 
 def save_manifest(processes, reason="periodic"):
-    """保存进程清单"""
+    """保存清单（保留兼容，但新架构不依赖manifest）"""
     manifest = {
-        "version": 2,
+        "version": 3,
         "saved_at": time.time(),
         "reason": reason,
         "processes": processes,
@@ -178,7 +181,7 @@ def save_manifest(processes, reason="periodic"):
 
 
 def load_manifest():
-    """读取进程清单"""
+    """读取清单（保留兼容）"""
     path = manifest_path()
     if not os.path.exists(path):
         return {}
