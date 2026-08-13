@@ -45,6 +45,12 @@ def restore_files(cfg):
 def install_deps(cfg):
     """执行依赖安装（直接执行，不用sudo。需要root的命令在ghvps.json里自己加sudo）"""
     cwd = cfg.get("cwd") or os.path.expanduser("~")
+    # 清理exclude目录（如node_modules），避免旧的root拥有的目录导致权限错误
+    for d in (cfg.get("exclude") or []):
+        path = os.path.join(cwd, d)
+        if os.path.exists(path):
+            subprocess.run(f"rm -rf {path}", shell=True, cwd=cwd, timeout=30)
+            logger.info(f"[restore] {cfg['name']}: 清理 {d}")
     for cmd in cfg.get("install") or []:
         logger.info(f"[restore] {cfg['name']} 安装: {cmd}")
         r = subprocess.run(
