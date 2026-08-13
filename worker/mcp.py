@@ -34,6 +34,25 @@ class McpManager:
         self.tunnel_mgr = None
         self.ready = False
 
+    def _patch_cloakbrowser(self):
+        """patch CloakBrowser: 从IGNORE_DEFAULT_ARGS去掉--enable-unsafe-swiftshader"""
+        config_js = os.path.join(MCP_SERVER_DIR, "node_modules", "cloakbrowser", "dist", "config.js")
+        if not os.path.exists(config_js):
+            return
+        try:
+            with open(config_js) as f:
+                content = f.read()
+            if "--enable-unsafe-swiftshader" in content:
+                content = content.replace(
+                    '["--enable-automation", "--enable-unsafe-swiftshader"]',
+                    '["--enable-automation"]'
+                )
+                with open(config_js, "w") as f:
+                    f.write(content)
+                logger.info("[mcp] CloakBrowser IGNORE_DEFAULT_ARGS patched (WebGL fix)")
+        except Exception as e:
+            logger.warning(f"[mcp] CloakBrowser patch失败: {e}")
+
     def _copy_server_code(self):
         """从解压目录复制 MCP 服务代码"""
         project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -82,6 +101,7 @@ class McpManager:
             shutil.rmtree(node_modules, ignore_errors=True)
             logger.info("[mcp] package.json 变更，重新安装依赖")
         if os.path.isdir(node_modules) and os.path.exists(index_js) and not pkg_changed:
+            self._patch_cloakbrowser()
             return True
         # 尝试从 Releases 下载预编译依赖
         try:
@@ -105,19 +125,7 @@ class McpManager:
                 cwd=MCP_SERVER_DIR, capture_output=True, text=True, timeout=300)
             if r.returncode == 0:
                 logger.info("[mcp] npm install 完成")
-                # patch: 从IGNORE_DEFAULT_ARGS去掉--enable-unsafe-swiftshader（否则Playwright吞掉它，WebGL不可用）
-                _config_js = os.path.join(MCP_SERVER_DIR, "node_modules", "cloakbrowser", "dist", "config.js")
-                if os.path.exists(_config_js):
-                    with open(_config_js) as f:
-                        _content = f.read()
-                    if "--enable-unsafe-swiftshader" in _content:
-                        _content = _content.replace(
-                            '["--enable-automation", "--enable-unsafe-swiftshader"]',
-                            '["--enable-automation"]'
-                        )
-                        with open(_config_js, "w") as f:
-                            f.write(_content)
-                        logger.info("[mcp] CloakBrowser IGNORE_DEFAULT_ARGS patched")
+                self._patch_cloakbrowser()
                 # 安装 Playwright 浏览器
                 cloak_cache = os.path.expanduser("~/.cloakbrowser/")
                 if not os.path.isdir(cloak_cache) or not os.listdir(cloak_cache):
