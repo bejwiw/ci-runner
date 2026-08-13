@@ -653,7 +653,9 @@ async function launchBrowser() {
       browser = await launch({
         headless: true,
         stealthArgs: false,
-        ignoreDefaultArgs: ["--enable-automation"],
+        launchOptions: {
+          ignoreDefaultArgs: ["--enable-automation"]
+        },
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
                "--enable-unsafe-swiftshader", "--use-angle=swiftshader",
                "--fingerprint=" + Math.floor(Math.random() * 90000 + 10000),
