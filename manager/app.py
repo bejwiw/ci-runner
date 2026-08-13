@@ -283,7 +283,8 @@ def worker_stats_api(inst_id):
 @require_auth
 def banned_accounts():
     result = []
-    for name, acc in accounts._accounts.items():
+    for acc in accounts.load_accounts():
+        name = acc.get("name", "")
         if acc.get("status") == "banned" or acc.get("banned"):
             result.append({
                 "name": name,
