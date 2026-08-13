@@ -28,7 +28,6 @@ logger = log.setup_logger("manager")
 log.clear_logs()
 
 
-
 # ==================== 500 错误处理 ====================
 @app.errorhandler(500)
 def _handle_500(e):
@@ -37,8 +36,6 @@ def _handle_500(e):
                    traceback=traceback.format_exc()[:2000]), 500
 
 
-
-# ==================== 500 错误处理（不黑盒）====================
 @app.errorhandler(Exception)
 def _handle_error(e):
     import traceback
@@ -48,6 +45,7 @@ def _handle_error(e):
         return jsonify(ok=False, error="Not Found"), 404
     return jsonify(ok=False, error=str(e),
                    traceback=traceback.format_exc()[:2000]), code
+
 
 # ==================== 认证 ====================
 def _token():
@@ -132,6 +130,7 @@ def logs():
         stats=log.get_stats())
 
 
+# ==================== S3 存储管理 ====================
 @app.route("/api/s3/status")
 @require_auth
 def s3_status():
@@ -162,24 +161,41 @@ def s3_status():
     )
 
 
+@app.route("/api/s3/health")
+def s3_health():
+    if state.s3pool:
+        return jsonify(ok=True, **state.s3pool.get_health())
+    return jsonify(ok=False, error="S3 未初始化"), 503
+
+
+@app.route("/api/s3/accounts")
+@require_auth
+def s3_accounts():
+    if state.s3pool:
+        return jsonify(ok=True, **state.s3pool.get_account_status())
+    return jsonify(ok=False, error="S3 未初始化"), 503
+
+
 @app.route("/api/s3/workers")
 @require_auth
 def s3_workers():
-    """查看每个worker的S3状态"""
+    """查看每个worker的S3状态（含累积统计）"""
     result = []
     for inst_id, hb in state.worker_heartbeats.items():
         s3 = hb.get("s3", {})
+        wstats = store.get_worker_stats(inst_id)
         result.append({
             "instance": inst_id,
             "last_seen": hb.get("last_seen", 0),
             "active": s3.get("active", 0),
             "degraded": s3.get("degraded", 0),
             "unavailable": s3.get("unavailable", 0),
-            "a_ops": s3.get("a_ops", 0),
-            "b_ops": s3.get("b_ops", 0),
-            "storage_mb": s3.get("storage_mb", 0),
+            "a_ops_total": wstats.get("a_count_total", 0),
+            "b_ops_total": wstats.get("b_count_total", 0),
+            "storage_mb": wstats.get("storage_mb", 0),
             "procs": hb.get("procs", 0),
             "disk_pct": hb.get("disk_pct", 0),
+            "last_backup": wstats.get("last_backup", 0),
         })
     return jsonify(ok=True, workers=result, total=len(result))
 
@@ -218,7 +234,6 @@ def worker_leader():
     return jsonify(ok=True, is_leader=is_ldr, current=hb)
 
 
-
 # ==================== 任务处理器 ====================
 @tasks.register_handler("add_account")
 def _task_add_account(params, task):
@@ -231,27 +246,6 @@ def _task_add_account(params, task):
     logger.info(f"[task] 账号 {params.get('name')} 配置完成")
 
 
-
-
-@app.route("/api/s3/accounts")
-@require_auth
-def s3_accounts():
-    """每个账号的详细状态（非active的优先显示）"""
-    if state.s3pool:
-        return jsonify(ok=True, **state.s3pool.get_account_status())
-    return jsonify(ok=False, error="S3 未初始化"), 503
-
-
-@app.route("/api/s3/health")
-def s3_health():
-    """S3健康摘要"""
-    if state.s3pool:
-        return jsonify(ok=True, **state.s3pool.get_health())
-    return jsonify(ok=False, error="S3 未初始化"), 503
-
-# ==================== 启动入口 ====================
-
-
 # ==================== Worker统计API ====================
 @app.route("/api/instances/<inst_id>/backup-history")
 @require_auth
@@ -259,17 +253,20 @@ def backup_history(inst_id):
     stats = store.get_worker_stats(inst_id)
     return jsonify(ok=True, history=stats.get("backup_history", []))
 
+
 @app.route("/api/instances/<inst_id>/restore-history")
 @require_auth
 def restore_history(inst_id):
     stats = store.get_worker_stats(inst_id)
     return jsonify(ok=True, history=stats.get("restore_history", []))
 
+
 @app.route("/api/instances/<inst_id>/timeline")
 @require_auth
 def worker_timeline(inst_id):
     stats = store.get_worker_stats(inst_id)
     return jsonify(ok=True, timeline=stats.get("timeline", []))
+
 
 @app.route("/api/instances/<inst_id>/stats")
 @require_auth
@@ -280,6 +277,7 @@ def worker_stats_api(inst_id):
         last_seen=hb.get("last_seen", 0),
         procs=hb.get("procs", 0),
         disk_pct=hb.get("disk_pct", 0))
+
 
 @app.route("/api/accounts/banned")
 @require_auth
@@ -295,29 +293,8 @@ def banned_accounts():
             })
     return jsonify(ok=True, banned=result, total=len(result))
 
-@app.route("/api/s3/workers")
-@require_auth
-def s3_workers():
-    """查看每个worker的S3状态"""
-    result = []
-    for inst_id, hb in state.worker_heartbeats.items():
-        s3 = hb.get("s3", {})
-        wstats = store.get_worker_stats(inst_id)
-        result.append({
-            "instance": inst_id,
-            "last_seen": hb.get("last_seen", 0),
-            "active": s3.get("active", 0),
-            "degraded": s3.get("degraded", 0),
-            "unavailable": s3.get("unavailable", 0),
-            "a_ops_total": wstats.get("a_count_total", 0),
-            "b_ops_total": wstats.get("b_count_total", 0),
-            "storage_mb": wstats.get("storage_mb", 0),
-            "procs": hb.get("procs", 0),
-            "disk_pct": hb.get("disk_pct", 0),
-            "last_backup": wstats.get("last_backup", 0),
-        })
-    return jsonify(ok=True, workers=result, total=len(result))
 
+# ==================== 启动入口 ====================
 def run():
     state.leader = core_lock.LeaderLock(backend="release")
     state.leader.acquire()
@@ -338,7 +315,6 @@ def run():
         threading.Thread(target=state.leader.follower_loop,
                          args=(_on_promote,), daemon=True).start()
 
-    # S3 初始化
     bootstrap = os.environ.get("S3_BOOTSTRAP", "")
     if bootstrap:
         state.s3pool = S3Pool(bootstrap, config.S3_ENDPOINT, config.S3_REGION)
@@ -350,9 +326,7 @@ def run():
     else:
         logger.warning("[boot] 无 S3_BOOTSTRAP，仅用 Releases")
 
-    # 预触发续命
     threading.Thread(target=_pre_wake, daemon=True).start()
-    # 自动更新
     threading.Thread(target=_auto_update, daemon=True).start()
 
     log.request_logger(app)
