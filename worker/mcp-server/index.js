@@ -652,9 +652,13 @@ async function launchBrowser() {
     try {
       browser = await launch({
         headless: true,
+        stealth_args: false,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
-               "--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
-        humanize: true
+               "--enable-unsafe-swiftshader", "--use-angle=swiftshader",
+               "--fingerprint=" + Math.floor(Math.random() * 90000 + 10000),
+               "--fingerprint-platform=windows"],
+        humanize: true,
+        timezone: "America/New_York"
       });
       const testCtx = await browser.newContext();
       const testPage = await testCtx.newPage();
