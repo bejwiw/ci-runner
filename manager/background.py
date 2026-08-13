@@ -47,9 +47,12 @@ def _heal_loop():
         try:
             if not state.leader or not state.leader.is_leader:
                 continue
-            # S3 状态持久化
+            # S3 状态持久化（单独 try，不阻塞后续逻辑）
             if state.s3pool:
-                state.s3pool.save_state()
+                try:
+                    state.s3pool.save_state()
+                except Exception as e:
+                    logger.warning(f"[heal] S3 状态持久化失败: {e}")
             # 实例清单自愈
             insts = store.list_instances()
             if not insts:

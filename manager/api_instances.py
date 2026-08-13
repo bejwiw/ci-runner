@@ -206,12 +206,13 @@ def instance_report(inst_id):
         return jsonify(ok=False, error="备份节点"), 503
     d = request.get_json(silent=True) or {}
     # 存储worker上报的S3统计到worker_heartbeats
+    # 不覆盖 job_id 和 heartbeat（leader 选举专用字段，由 /api/worker/heartbeat 维护）
     _s3 = d.get("s3", {})
     _pa = _s3.get("a_ops", 0)
     _pb = _s3.get("b_ops", 0)
     _storage = _s3.get("storage_mb", 0)
-    state.worker_heartbeats[inst_id] = {
-        "job_id": d.get("job_id", ""),
+    _existing = state.worker_heartbeats.get(inst_id, {})
+    _existing.update({
         "last_seen": time.time(),
         "s3": _s3,
         "procs": d.get("procs", 0),
@@ -219,7 +220,8 @@ def instance_report(inst_id):
         "a_ops": _pa,
         "b_ops": _pb,
         "storage_mb": _storage,
-    }
+    })
+    state.worker_heartbeats[inst_id] = _existing
     # 累积到worker_stats（次数累积，存储实时，历史每次更新）
     _wstats = store.get_worker_stats(inst_id)
     if _pa > 0 or _pb > 0:

@@ -86,6 +86,10 @@ WORKER_WORKFLOW = os.environ.get("WORKER_WORKFLOW", "worker.yml")
 # ==================== Releases 存储常量 ====================
 BACKUP_TAG = "backup"
 ASSET_LEADER = "leader.json"
+# 默认资产名（inst_cfg 为 None 时的降级路径用，避免 AttributeError）
+ASSET_DB = "inst-global.db.enc"
+ASSET_FILES = "inst-global.files.tar.gz.enc"
+ASSET_PROC = "inst-global.processes.tar.gz.enc"
 
 # ==================== WSS 终端 ====================
 SESSION_TTL = int(os.environ.get("SESSION_TTL", "180"))

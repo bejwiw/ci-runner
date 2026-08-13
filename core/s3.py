@@ -117,6 +117,7 @@ class S3Pool:
                 "last_success": 0, "month": current_month,
             }
         self._initialized = True
+        self.load_state()
         self.start_recovery()
         return True
 
@@ -288,9 +289,24 @@ class S3Pool:
         if account_idx is None:
             return True
         try:
-            self._get_client(account_idx).delete(key)
+            client = self._get_client(account_idx)
+            # 先查对象大小用于回扣 used_bytes
+            file_size = 0
+            try:
+                from botocore.exceptions import ClientError
+                head = client._client.head_object(
+                    Bucket=client.bucket, Key=f"ghbox/{key}")
+                file_size = head.get("ContentLength", 0) or 0
+            except ClientError:
+                pass
+            except Exception:
+                pass
+            client.delete(key)
             with self._lock:
                 self._counters[account_idx]["a_count"] += 1
+                if file_size > 0:
+                    self._counters[account_idx]["used_bytes"] = max(
+                        0, self._counters[account_idx]["used_bytes"] - file_size)
             self._record_success(account_idx)
             return True
         except Exception as e:
@@ -340,6 +356,7 @@ class S3Pool:
             try:
                 self._probe_unavailable()
                 self._check_monthly_reset()
+                self.save_state()
             except Exception as e:
                 logger.error(f"[s3] 恢复探测异常: {e}")
 
@@ -377,6 +394,53 @@ class S3Pool:
                     c["fail_count"] = 0
                     c["month"] = current_month
                     logger.info(f"[s3] 账号{idx} 月度重置")
+
+    # ==================== 计数器持久化 ====================
+    _STATE_KEY = "meta/s3-counters.json"
+
+    def save_state(self):
+        """持久化计数器到 bootstrap 桶（防止重启归零）"""
+        if not self._initialized:
+            return
+        with self._lock:
+            state = {str(idx): dict(c) for idx, c in self._counters.items()}
+        try:
+            data = json.dumps(state, ensure_ascii=False).encode()
+            self._get_client(0).put(self._STATE_KEY, data)
+            logger.info(f"[s3] 计数器已持久化 ({len(state)} 账号)")
+        except Exception as e:
+            logger.warning(f"[s3] 计数器持久化失败: {e}")
+
+    def load_state(self):
+        """从 bootstrap 桶恢复计数器"""
+        try:
+            raw = self._get_client(0).get(self._STATE_KEY)
+            if not raw:
+                return
+            state = json.loads(raw.decode())
+            now = time.gmtime()
+            current_month = now.tm_year * 12 + now.tm_mon
+            restored = 0
+            for idx_str, saved in state.items():
+                idx = int(idx_str)
+                if idx not in self._counters:
+                    continue
+                c = self._counters[idx]
+                # 跨月则不恢复计数，但恢复状态
+                if saved.get("month") == current_month:
+                    c["a_count"] = saved.get("a_count", 0)
+                    c["b_count"] = saved.get("b_count", 0)
+                c["used_bytes"] = saved.get("used_bytes", 0)
+                c["status"] = saved.get("status", "active")
+                c["fail_count"] = saved.get("fail_count", 0)
+                c["last_error"] = saved.get("last_error", "")
+                c["last_error_time"] = saved.get("last_error_time", 0)
+                c["last_success"] = saved.get("last_success", 0)
+                c["month"] = saved.get("month", current_month)
+                restored += 1
+            logger.info(f"[s3] 恢复 {restored} 个账号计数器")
+        except Exception as e:
+            logger.warning(f"[s3] 恢复计数器失败: {e}")
 
 
     # ==================== 分片存储（大文件）====================
@@ -434,7 +498,8 @@ class S3Pool:
                     self._record_failure(account, e)
             return idx, None
 
-        with ThreadPoolExecutor(max_workers=CHUNK_CONCURRENCY) as executor:
+        workers = _dynamic_concurrency(file_size)
+        with ThreadPoolExecutor(max_workers=workers) as executor:
             results = list(executor.map(upload_chunk, range(num_chunks)))
         for idx, account in results:
             if account is None:
@@ -505,7 +570,8 @@ class S3Pool:
                     self._record_failure(alt, e)
             return idx, None
 
-        with ThreadPoolExecutor(max_workers=CHUNK_CONCURRENCY) as executor:
+        workers = _dynamic_concurrency(total_size)
+        with ThreadPoolExecutor(max_workers=workers) as executor:
             results = list(executor.map(download_chunk, locations))
         for idx, data in results:
             if data is None:

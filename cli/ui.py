@@ -46,6 +46,8 @@ def instance_menu():
         print("  [a] Worker日志（代理）")
         print("  [b] Worker进程（代理）")
         print("  [c] Worker资源（代理）")
+        print("  [d] 日志实时跟随")
+        print("  [e] 批量执行命令")
         print("  [0] 返回主菜单")
         choice = _input("\n  请选择: ")
         if choice == "1":
@@ -72,6 +74,10 @@ def instance_menu():
             ops.proxy_processes()
         elif choice in ("c", "C"):
             ops.proxy_resource()
+        elif choice in ("d", "D"):
+            ops.logs_follow()
+        elif choice in ("e", "E"):
+            ops.exec_batch()
         elif choice == "0" or choice is None:
             break
         else:

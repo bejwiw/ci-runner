@@ -109,6 +109,7 @@ def load_or_create(inst_cfg):
     files_key = f"inst-files/{inst_id}/files.tar.gz"
     db_asset = inst_cfg.asset_db if inst_cfg else config.ASSET_DB
     files_asset = inst_cfg.asset_files if inst_cfg else config.ASSET_FILES
+    proc_asset = getattr(config, "ASSET_PROC", "inst-global.processes.tar.gz.enc")
     status_msg = "新建初始数据库"
 
     # 数据库

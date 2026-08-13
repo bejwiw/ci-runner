@@ -119,22 +119,67 @@ def json_mode(args):
         print(json_dumps(api.get("/api/s3/accounts")))
     elif op == "s3-workers":
         print(json_dumps(api.get("/api/s3/workers")))
-    elif op == "backup-history":
-        print(json_dumps(api.get(f"/api/instances/{args[0]}/backup-history")))
-    elif op == "restore-history":
-        print(json_dumps(api.get(f"/api/instances/{args[0]}/restore-history")))
-    elif op == "timeline":
-        print(json_dumps(api.get(f"/api/instances/{args[0]}/timeline")))
+    elif op == "backup-history" and len(args) > 1:
+        print(json_dumps(api.get(f"/api/instances/{args[1]}/backup-history")))
+    elif op == "restore-history" and len(args) > 1:
+        print(json_dumps(api.get(f"/api/instances/{args[1]}/restore-history")))
+    elif op == "timeline" and len(args) > 1:
+        print(json_dumps(api.get(f"/api/instances/{args[1]}/timeline")))
     elif op == "banned":
         print(json_dumps(api.get("/api/accounts/banned")))
-    elif op == "worker-stats":
-        print(json_dumps(api.get(f"/api/instances/{args[0]}/stats")))
+    elif op == "worker-stats" and len(args) > 1:
+        print(json_dumps(api.get(f"/api/instances/{args[1]}/stats")))
     elif op == "logs-proxy" and len(args) > 1:
         print(json_dumps(api.get(f"/api/instances/{args[1]}/logs?limit=50")))
     elif op == "processes-proxy" and len(args) > 1:
         print(json_dumps(api.get(f"/api/instances/{args[1]}/processes")))
     elif op == "resource-proxy" and len(args) > 1:
         print(json_dumps(api.get(f"/api/instances/{args[1]}/resource")))
+    elif op == "exec-batch" and len(args) > 2:
+        # 批量执行：exec-batch <inst_id> <cmd1> <cmd2> ...
+        results = []
+        for cmd in args[2:]:
+            r = api.post(f"/api/instances/{args[1]}/exec",
+                         {"cmd": cmd, "timeout": 30})
+            results.append({"cmd": cmd, "result": r.get("result") or r})
+        print(json_dumps({"ok": True, "results": results}))
+    elif op == "wait" and len(args) > 1:
+        # 等待实例就绪：轮询 /api/health 直到 200
+        import time as _t
+        inst = api.get("/api/instances")
+        host = None
+        for i in inst.get("instances", []):
+            if i["id"] == args[1]:
+                host = i.get("hostname")
+                break
+        if not host:
+            print(json_dumps({"ok": False, "error": "实例不存在"}))
+        else:
+            for attempt in range(60):
+                r = api.get_url(f"https://{host}/api/health", timeout=10)
+                if r.get("ok"):
+                    print(json_dumps({"ok": True, "host": host, "attempts": attempt + 1}))
+                    break
+                _t.sleep(5)
+            else:
+                print(json_dumps({"ok": False, "error": "超时未就绪"}))
+    elif op == "logs-follow" and len(args) > 1:
+        # 日志实时跟随：轮询 /api/logs 每2秒拉一次
+        import time as _t
+        seen = 0
+        while True:
+            try:
+                d = api.get(f"/api/instances/{args[1]}/logs?limit=500")
+                if d.get("ok"):
+                    logs = d.get("logs", [])
+                    new_logs = logs[seen:] if seen < len(logs) else []
+                    for entry in new_logs:
+                        if isinstance(entry, dict):
+                            print(f"[{entry.get('level','')}] {entry.get('msg','')}")
+                    seen = len(logs)
+            except Exception:
+                pass
+            _t.sleep(2)
 
     else:
         print(json_dumps({"ok": False, "error": f"未知操作: {op}"}))

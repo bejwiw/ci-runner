@@ -18,6 +18,8 @@ from manager import store, accounts
 logger = log.setup_logger("monitor")
 
 _fail_counts = {}
+_restart_counts = {}
+MAX_RESTART = 5
 
 
 def check_health(host):
@@ -32,15 +34,25 @@ def check_health(host):
 
 
 def _restart_instance(inst):
+    n = _restart_counts.get(inst["id"], 0)
+    if n >= MAX_RESTART:
+        logger.error(f"[monitor] 实例 {inst['id']} 连续重启 {n} 次仍失败，标记 failed 不再重启")
+        inst["status"] = "failed"
+        return False
+    delay = min(2 ** n, 300)
+    logger.warning(f"[monitor] 实例 {inst['id']} 第 {n+1}/{MAX_RESTART} 次重启，等待 {delay}s")
+    time.sleep(delay)
     account = next((a for a in accounts.load_accounts()
                     if a["name"] == inst.get("account")), None)
     if not account:
-        return
+        return False
     repo = account.get("repo") or config.REPO
     url = f"{ghapi.API_BASE}/repos/{repo}/actions/workflows/{config.WORKER_WORKFLOW}/dispatches"
     ghapi.gh_request("POST", url, token=account.get("token"),
                      data={"ref": "main", "inputs": {"INSTANCE_ID": inst["id"]}})
-    logger.info(f"[monitor] 实例 {inst['id']} 已自动重启")
+    _restart_counts[inst["id"]] = n + 1
+    logger.info(f"[monitor] 实例 {inst['id']} 已触发第 {n+1} 次重启")
+    return True
 
 
 def _auto_cleanup_account(account):
@@ -48,6 +60,7 @@ def _auto_cleanup_account(account):
     insts = store.load_instances()
     for inst in insts:
         if inst.get("account") == account.get("name") and not inst.get("closed"):
+            _restart_counts.pop(inst["id"], None)
             try:
                 store.close_instance(inst["id"])
             except Exception as e:
@@ -69,6 +82,7 @@ def health_monitor_loop():
                     continue
                 if check_health(host):
                     _fail_counts[inst["id"]] = 0
+                    _restart_counts.pop(inst["id"], None)
                     if inst.get("status") != "running":
                         inst["status"] = "running"
                         inst["last_seen"] = time.time()

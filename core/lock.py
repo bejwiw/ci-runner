@@ -46,7 +46,15 @@ class LeaderLock:
                 "User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=10) as r:
                 d = json.loads(r.read().decode())
-                if d.get("ok") and d.get("is_leader"):
+                if not d.get("ok"):
+                    return None
+                # 有别的活跃 leader → 返回"别人的心跳"防止 acquire
+                if d.get("has_leader") and d.get("leader_job") != self.job_id:
+                    age = d.get("leader_age", 0)
+                    return {"job_id": d.get("leader_job"),
+                            "heartbeat": time.time() - max(0, age)}
+                # 自己是 leader → 返回自己的心跳
+                if d.get("is_leader"):
                     return {"job_id": self.job_id, "heartbeat": time.time()}
             return None
         except Exception:
@@ -115,6 +123,11 @@ class LeaderLock:
                             self._fire_promote()
                             return
                 else:
+                    # 先检查是否已有别的活跃 leader，有则等它过期
+                    d = self._read_heartbeat()
+                    if d and d.get("job_id") != JOB_ID:
+                        continue
+                    # 无 leader 或自己曾是 leader，写心跳抢占
                     ok = self._write_heartbeat()
                     if ok:
                         d = self._read_heartbeat()

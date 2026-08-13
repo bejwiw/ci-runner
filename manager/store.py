@@ -66,6 +66,8 @@ def load_instances():
         data = _s3_get_json("meta/instances.json")
         if data is not None and isinstance(data, list):
             logger.info(f"[store] 从 S3 加载 {len(data)} 个实例")
+            _cache["instances"] = data
+            _cache_time["instances"] = now
             return data
     data = releases.load_json_enc("instances.json.enc", default=[])
     count = len(data) if isinstance(data, list) else 0

@@ -60,11 +60,13 @@ def create_tunnel(hostname, service_url="http://127.0.0.1:8080"):
     tid = d["result"]["id"]
     ttoken = d["result"]["token"]
     # 2. 单独更新 ingress（创建时 config 不生效的坑）
-    _cf_request("PUT",
+    cfg_status, _ = _cf_request("PUT",
         f"https://api.cloudflare.com/client/v4/accounts/{config.CF_ACCOUNT_ID}/cfd_tunnel/{tid}/configurations",
         data={"config": {"ingress": [
             {"hostname": hostname, "service": service_url},
             {"service": "http_status:404"}]}})
+    if cfg_status not in (200, 201):
+        logger.warning(f"[tunnel] {hostname} ingress 配置更新失败: {cfg_status}")
     # 3. DNS CNAME（处理已存在的记录）
     if config.CF_ZONE_ID:
         dns_status, dns_d = _cf_request("POST",

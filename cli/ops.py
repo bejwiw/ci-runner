@@ -102,6 +102,19 @@ def create_instance():
         print(f"  创建成功: {inst.get('id')} -> {inst.get('url')}")
         if inst.get("mcp_url"):
             print(f"     MCP: {inst.get('mcp_url')}")
+        # 等待实例就绪
+        host = inst.get("hostname", "")
+        if host:
+            print("  等待实例就绪...")
+            import time as _t
+            for attempt in range(60):
+                r = api.get_url(f"https://{host}/api/health", timeout=10)
+                if r.get("ok"):
+                    print(f"  实例已就绪（{attempt*5}s）")
+                    break
+                _t.sleep(5)
+            else:
+                print("  实例暂未就绪，稍后可用 ghss --json wait {} 检查".format(inst.get("id")))
     else:
         print(f"  失败: {d.get('error')}")
 
@@ -193,7 +206,7 @@ def overview():
     print(f"  Worker: 在线 {wh.get('online', 0)}/{wh.get('total', 0)}")
     s3 = d.get("s3", {})
     print(f"  S3: {'就绪' if s3.get('ready') else '未就绪'} | "
-          f"账号 {s3.get('total_accounts', 0)} | 路由 {s3.get('routing_entries', 0)} | "
+          f"账号 {s3.get('total_accounts', 0)} | 哈希环 {s3.get('hash_ring_size', 0)} | "
           f"存储 {s3.get('total_storage_mb', 0)}MB")
     tasks = d.get("tasks", {})
     if tasks:
@@ -326,6 +339,61 @@ def backup_now():
               f"耗时={d.get('elapsed', 0)}s")
     else:
         print(f"  失败: {d.get('error')}")
+
+
+def logs_follow():
+    """日志实时跟随（轮询每2秒）"""
+    inst = pick_instance()
+    if not inst:
+        return
+    print(f"  跟随 {inst['id']} 日志（Ctrl+C 退出）...")
+    import time as _t
+    seen = 0
+    try:
+        while True:
+            d = api.get(f"/api/instances/{inst['id']}/logs?limit=500")
+            if d.get("ok"):
+                logs = d.get("logs", [])
+                new_logs = logs[seen:] if seen < len(logs) else []
+                for entry in new_logs:
+                    if isinstance(entry, dict):
+                        print(f"  [{entry.get('level','')}] {entry.get('msg','')}")
+                seen = len(logs)
+            _t.sleep(2)
+    except KeyboardInterrupt:
+        print("\n  已停止跟随")
+
+
+def exec_batch():
+    """批量执行命令（每行一条命令，空行结束）"""
+    inst = pick_instance()
+    if not inst:
+        return
+    print("  输入命令（每行一条，空行结束）:")
+    cmds = []
+    while True:
+        cmd = _input(f"  cmd{len(cmds)+1}> ")
+        if cmd is None:
+            break
+        cmds.append(cmd)
+    if not cmds:
+        print("  无命令")
+        return
+    for cmd in cmds:
+        print(f"\n  >> {cmd}")
+        d = api.post(f"/api/instances/{inst['id']}/exec",
+                     {"cmd": cmd, "timeout": 30})
+        r = d.get("result") or d
+        if r.get("ok"):
+            out = r.get("stdout", "")
+            if out:
+                print(out, end="")
+            err = r.get("stderr", "")
+            if err:
+                print(f"  [stderr] {err}")
+            print(f"  [exit={r.get('code', '?')}]")
+        else:
+            print(f"  失败: {d.get('error', r.get('error', ''))}")
 
 
 def exec_cmd():

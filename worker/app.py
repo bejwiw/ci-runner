@@ -12,6 +12,7 @@ import json
 import time
 import select
 import signal
+import functools
 import threading
 import subprocess
 import urllib.request
@@ -94,6 +95,16 @@ def _check(data=None):
     return bool(config.EXEC_TOKEN) and token == config.EXEC_TOKEN
 
 
+def require_auth(f):
+    """鉴权装饰器（/api/health 和 / 除外，探活用）"""
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        if not _check():
+            return jsonify(ok=False, error="未授权"), 401
+        return f(*args, **kwargs)
+    return wrapper
+
+
 # ==================== 路由 ====================
 @app.route("/")
 def index():
@@ -109,6 +120,7 @@ def health():
 
 
 @app.route("/api/status")
+@require_auth
 def status():
     return jsonify(ok=True, instance=config.INSTANCE_ID, job_id=core_lock.JOB_ID,
                    elapsed=core_status.elapsed(),
@@ -118,6 +130,7 @@ def status():
 
 
 @app.route("/api/logs")
+@require_auth
 def logs():
     limit = max(10, min(int(request.args.get("limit", 300)), 2000))
     return jsonify(ok=True, logs=log.get_logs(
@@ -127,6 +140,7 @@ def logs():
 
 
 @app.route("/api/resource")
+@require_auth
 def resource():
     stats = log.get_resource_stats()
     stats["elapsed"] = core_status.elapsed()
@@ -211,6 +225,7 @@ def backup_now():
 
 
 @app.route("/api/term/screen")
+@require_auth
 def term_screen():
     return jsonify(ok=True, screen=terminal.get_screen(request.args.get("session", "")))
 
@@ -245,6 +260,7 @@ def attack_stop():
 
 
 @app.route("/api/attack/status")
+@require_auth
 def attack_status():
     return jsonify(ok=True, **attack.attack_status())
 

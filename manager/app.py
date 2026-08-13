@@ -162,6 +162,7 @@ def s3_status():
 
 
 @app.route("/api/s3/health")
+@require_auth
 def s3_health():
     if state.s3pool:
         return jsonify(ok=True, **state.s3pool.get_health())
@@ -203,14 +204,17 @@ def s3_workers():
 # ==================== Worker 心跳 ====================
 @app.route("/api/worker/heartbeat", methods=["POST"])
 def worker_heartbeat():
+    """worker leader 心跳：记录 job_id + heartbeat 时间戳"""
     if not _authed():
         return jsonify(ok=False, error="未授权"), 401
     d = request.get_json(silent=True) or {}
     inst_id = d.get("inst_id", "")
     if inst_id:
         _s3 = d.get("s3", {})
-        state.worker_heartbeats[inst_id] = {
+        _existing = state.worker_heartbeats.get(inst_id, {})
+        _existing.update({
             "job_id": d.get("job_id", ""),
+            "heartbeat": time.time(),
             "last_seen": time.time(),
             "version": d.get("version", "unknown"),
             "s3": _s3,
@@ -219,19 +223,29 @@ def worker_heartbeat():
             "a_ops": _s3.get("a_ops", 0),
             "b_ops": _s3.get("b_ops", 0),
             "storage_mb": _s3.get("storage_mb", 0),
-        }
+        })
+        state.worker_heartbeats[inst_id] = _existing
     return jsonify(ok=True)
 
 
 @app.route("/api/worker/leader")
 def worker_leader():
+    """返回完整 leader 状态，供 worker 判断是否有别的活跃 leader"""
     if not _authed():
         return jsonify(ok=False, error="未授权"), 401
     inst_id = request.args.get("inst_id", "")
     job_id = request.args.get("job_id", "")
-    hb = state.worker_heartbeats.get(inst_id)
-    is_ldr = bool(hb and hb.get("job_id") == job_id)
-    return jsonify(ok=True, is_leader=is_ldr, current=hb)
+    now = time.time()
+    hb = state.worker_heartbeats.get(inst_id, {})
+    leader_job = hb.get("job_id", "")
+    heartbeat_ts = hb.get("heartbeat", 0)
+    has_leader = bool(leader_job and heartbeat_ts
+                      and (now - heartbeat_ts) < config.HEARTBEAT_TIMEOUT)
+    is_ldr = has_leader and leader_job == job_id
+    leader_age = int(now - heartbeat_ts) if heartbeat_ts else -1
+    return jsonify(ok=True, is_leader=is_ldr, has_leader=has_leader,
+                   leader_job=leader_job if has_leader else "",
+                   leader_age=leader_age, current=hb)
 
 
 # ==================== 任务处理器 ====================
