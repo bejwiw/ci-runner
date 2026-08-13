@@ -195,7 +195,7 @@ def backup_now():
             _s = state.s3pool.get_status()
             _aa, _ab = _s.get("total_a_ops", 0), _s.get("total_b_ops", 0)
         _da, _db = max(0, _aa - _ba), max(0, _ab - _bb)
-        _size = int(db_size or 0) + int((res[0] if res else 0) * 1048576)
+        _size = int(db_size or 0) + int((res[0] if res else 0))
         persistence.record_backup("success", _size,
             f"db={db_size}B files={res[0] if res else 0}MB elapsed={elapsed:.1f}s",
             _da, _db)

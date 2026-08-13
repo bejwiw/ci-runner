@@ -54,7 +54,7 @@ def _backup_loop():
                 _s = state.s3pool.get_status()
                 _aa, _ab = _s.get("total_a_ops", 0), _s.get("total_b_ops", 0)
             _da, _db = max(0, _aa - _ba), max(0, _ab - _bb)
-            _size = int(db_size or 0) + int((res[0] if res else 0) * 1048576)
+            _size = int(db_size or 0) + int((res[0] if res else 0))
             persistence.record_backup("success", _size,
                 f"auto: db={db_size}B files={res[0] if res else 0}MB", _da, _db)
         except Exception as e:
@@ -133,7 +133,7 @@ def _worker_pre_wake():
                         state.proc_mgr.final_snapshot()
                     db_size, _ = persistence.backup_database(state.inst_cfg)
                     res = persistence.backup_files(state.inst_cfg)
-                    _size = int(db_size or 0) + int((res[0] if res else 0) * 1048576)
+                    _size = int(db_size or 0) + int((res[0] if res else 0))
                     persistence.record_backup("prewake", _size,
                         f"prewake: db={db_size}B files={res[0] if res else 0}MB", 0, 0)
                     logger.info("[prewake] 强制备份完成")
