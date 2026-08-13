@@ -7,6 +7,27 @@
 import time
 from cli import api, config
 
+# ==================== 颜色系统 ====================
+class C:
+    R = "\033[31m"
+    G = "\033[32m"
+    Y = "\033[33m"
+    B = "\033[34m"
+    P = "\033[35m"
+    C = "\033[36m"
+    W = "\033[37m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    RST = "\033[0m"
+
+def _ok(s): return f"{C.G}{s}{C.RST}"
+def _err(s): return f"{C.R}{s}{C.RST}"
+def _warn(s): return f"{C.Y}{s}{C.RST}"
+def _info(s): return f"{C.B}{s}{C.RST}"
+def _dim(s): return f"{C.DIM}{s}{C.RST}"
+def _bold(s): return f"{C.BOLD}{s}{C.RST}"
+
+
 
 def _input(prompt):
     try:
