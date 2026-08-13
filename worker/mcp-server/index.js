@@ -652,10 +652,9 @@ async function launchBrowser() {
     try {
       browser = await launch({
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-        humanize: true,
-        timezone: "Asia/Shanghai",
-        locale: "zh-CN"
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+               "--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
+        humanize: true
       });
       const testCtx = await browser.newContext();
       const testPage = await testCtx.newPage();
