@@ -43,12 +43,12 @@ def restore_files(cfg):
 
 
 def install_deps(cfg):
-    """执行依赖安装（用sudo -n，超时180秒）"""
+    """执行依赖安装（直接执行，不用sudo。需要root的命令在ghvps.json里自己加sudo）"""
     cwd = cfg.get("cwd") or os.path.expanduser("~")
     for cmd in cfg.get("install") or []:
         logger.info(f"[restore] {cfg['name']} 安装: {cmd}")
         r = subprocess.run(
-            f"sudo -E -n {cmd}", shell=True, capture_output=True, text=True,
+            cmd, shell=True, capture_output=True, text=True,
             timeout=180, cwd=cwd, executable="/bin/bash")
         if r.returncode != 0:
             raise RuntimeError(f"安装失败: {r.stderr[:200]}")
