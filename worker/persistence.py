@@ -229,13 +229,16 @@ def backup_files_to_disk():
 def restore_files_from_file(file_path):
     """从磁盘文件解包"""
     try:
-        # 检测压缩格式：zstd或gzip
         with open(file_path, "rb") as _f:
             _hdr = _f.read(4)
-        _tar_flag = "--zstd" if _hdr[:4] == b"\x28\xb5\x2f\xfd" else "xzf"
-        result = subprocess.run(
-            ["sudo", "tar", _tar_flag if _tar_flag == "xzf" else "--zstd", "-xf" if _tar_flag == "--zstd" else "-xzf", file_path, "-C", os.path.dirname(config.FILES_DIR)],
-            capture_output=True, timeout=300)
+        if _hdr[:4] == b"\x28\xb5\x2f\xfd":
+            result = subprocess.run(
+                ["sudo", "tar", "--zstd", "-xf", file_path, "-C", os.path.dirname(config.FILES_DIR)],
+                capture_output=True, timeout=300)
+        else:
+            result = subprocess.run(
+                ["sudo", "tar", "xzf", file_path, "-C", os.path.dirname(config.FILES_DIR)],
+                capture_output=True, timeout=300)
         if result.returncode != 0:
             logger.error(f"[persist] 文件解压失败: {result.stderr.decode(errors='replace')[:200]}")
             return False
