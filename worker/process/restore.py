@@ -138,9 +138,40 @@ def restore_one(name, cfg=None):
     return False, None
 
 
+def _restore_ghvps_from_processes():
+    """从processes目录恢复ghvps.json到项目目录（files.tar.gz损坏时的兜底）"""
+    import shutil
+    proc_dir = pconfig.proc_dir()
+    if not os.path.isdir(proc_dir):
+        return
+    for name in os.listdir(proc_dir):
+        if name == "manifest.json":
+            continue
+        ghvps_path = os.path.join(proc_dir, name, "ghvps.json")
+        if not os.path.exists(ghvps_path):
+            continue
+        try:
+            with open(ghvps_path) as f:
+                cfg = json.load(f)
+            cwd = cfg.get("cwd", "")
+            if not cwd or not cwd.startswith(config.FILES_DIR):
+                continue
+            os.makedirs(cwd, exist_ok=True)
+            dst = os.path.join(cwd, "ghvps.json")
+            if not os.path.exists(dst):
+                shutil.copy2(ghvps_path, dst)
+                logger.info(f"[restore] {name}: ghvps.json恢复到 {cwd}")
+        except Exception as e:
+            logger.warning(f"[restore] {name}: ghvps.json恢复失败: {e}")
+
+
 def restore_all():
     """从scan_configs()读取所有ghvps.json，恢复进程"""
     configs = pconfig.scan_configs()
+    if not configs:
+        # files.tar.gz可能损坏，从processes目录恢复ghvps.json
+        _restore_ghvps_from_processes()
+        configs = pconfig.scan_configs()
     if not configs:
         return 0, 0
     restored, failed = 0, 0
