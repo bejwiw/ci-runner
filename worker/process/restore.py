@@ -43,21 +43,28 @@ def restore_files(cfg):
 
 
 def install_deps(cfg):
-    """执行依赖安装（直接执行，不用sudo。需要root的命令在ghvps.json里自己加sudo）"""
+    """执行依赖安装（直接执行，不用sudo。遇到权限错误自动sudo chown后重试）"""
     cwd = cfg.get("cwd") or os.path.expanduser("~")
-    # 清理exclude目录（如node_modules），避免旧的root拥有的目录导致权限错误
-    for d in (cfg.get("exclude") or []):
-        path = os.path.join(cwd, d)
-        if os.path.exists(path):
-            subprocess.run(f"rm -rf {path}", shell=True, cwd=cwd, timeout=30)
-            logger.info(f"[restore] {cfg['name']}: 清理 {d}")
+    name = cfg.get("name", "proc")
     for cmd in cfg.get("install") or []:
-        logger.info(f"[restore] {cfg['name']} 安装: {cmd}")
+        logger.info(f"[restore] {name} 安装: {cmd}")
         r = subprocess.run(
             cmd, shell=True, capture_output=True, text=True,
             timeout=180, cwd=cwd, executable="/bin/bash")
         if r.returncode != 0:
-            raise RuntimeError(f"安装失败: {r.stderr[:200]}")
+            _stderr = r.stderr or ""
+            _stdout = r.stdout or ""
+            # 遇到权限错误，sudo chown修改目录权限后重试
+            if "EACCES" in _stderr or "EACCES" in _stdout or "permission denied" in _stderr.lower():
+                logger.warning(f"[restore] {name} 权限错误，自动修复权限后重试")
+                subprocess.run(f"sudo chown -R runner:runner {cwd}", shell=True, timeout=30)
+                r = subprocess.run(
+                    cmd, shell=True, capture_output=True, text=True,
+                    timeout=180, cwd=cwd, executable="/bin/bash")
+            if r.returncode != 0:
+                _full_err = f"returncode={r.returncode}\nstderr={r.stderr or ''}\nstdout={r.stdout or ''}"
+                logger.error(f"[restore] {name} 安装失败: {_full_err[:500]}")
+                raise RuntimeError(f"安装失败(returncode={r.returncode}): {r.stderr[:300]}")
 
 
 def start_process(name, cfg=None):
