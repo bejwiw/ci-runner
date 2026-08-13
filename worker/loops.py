@@ -73,12 +73,14 @@ def _report_running():
                 s3_summary = state.s3pool.get_health()
                 s3_summary.pop("ready", None)
                 s3_summary.pop("total", None)
-            # 从stats.json获取pending和存储用量
+            # 从stats.json获取pending、存储用量和备份历史
             from worker import persistence
-            _pa, _pb = persistence.get_pending()
+            _stats = persistence.load_stats()
+            _pa, _pb = _stats.get("pending_a", 0), _stats.get("pending_b", 0)
             s3_summary["a_ops"] = _pa
             s3_summary["b_ops"] = _pb
-            s3_summary["storage_mb"] = persistence.get_storage_mb()
+            s3_summary["storage_mb"] = _stats.get("storage_mb", 0)
+            s3_summary["backup_history"] = _stats.get("backup_history", [])
             # 收集进程数
             proc_count = 0
             if state.proc_mgr:

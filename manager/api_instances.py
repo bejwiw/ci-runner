@@ -220,15 +220,18 @@ def instance_report(inst_id):
         "b_ops": _pb,
         "storage_mb": _storage,
     }
-    # 累积到worker_stats（次数累积，存储实时）
+    # 累积到worker_stats（次数累积，存储实时，历史每次更新）
+    _wstats = store.get_worker_stats(inst_id)
     if _pa > 0 or _pb > 0:
-        _wstats = store.get_worker_stats(inst_id)
         _wstats["a_count_total"] = _wstats.get("a_count_total", 0) + _pa
         _wstats["b_count_total"] = _wstats.get("b_count_total", 0) + _pb
-        _wstats["storage_mb"] = _storage
-        _wstats["last_backup"] = time.time()
-        _wstats["last_seen"] = time.time()
-        store.save_worker_stats(inst_id, _wstats)
+    _wstats["storage_mb"] = _storage
+    _wstats["last_backup"] = time.time()
+    _wstats["last_seen"] = time.time()
+    _bh = _s3.get("backup_history", [])
+    if _bh:
+        _wstats["backup_history"] = _bh
+    store.save_worker_stats(inst_id, _wstats)
     inst = store.get_instance(inst_id)
     if not inst:
         cfg = store.load_instance_config(inst_id)
