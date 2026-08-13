@@ -233,11 +233,11 @@ def restore_files_from_file(file_path):
             _hdr = _f.read(4)
         if _hdr[:4] == b"\x28\xb5\x2f\xfd":
             result = subprocess.run(
-                ["sudo", "tar", "--zstd", "-xf", file_path, "-C", os.path.dirname(config.FILES_DIR)],
+                ["sudo", "tar", "--zstd", "-xf", file_path, "-C", os.path.dirname(config.FILES_DIR), "--exclude=kodebite/stats.json"],
                 capture_output=True, timeout=300)
         else:
             result = subprocess.run(
-                ["sudo", "tar", "xzf", file_path, "-C", os.path.dirname(config.FILES_DIR)],
+                ["sudo", "tar", "xzf", file_path, "-C", os.path.dirname(config.FILES_DIR), "--exclude=kodebite/stats.json"],
                 capture_output=True, timeout=300)
         if result.returncode != 0:
             logger.error(f"[persist] 文件解压失败: {result.stderr.decode(errors='replace')[:200]}")
