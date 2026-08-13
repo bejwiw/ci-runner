@@ -8,6 +8,7 @@
 3. _worker_pre_wake 从 S3 读实例配置（不只从 Releases）
 """
 import os
+import json
 import time
 import sqlite3
 import threading
