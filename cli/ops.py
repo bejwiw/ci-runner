@@ -184,17 +184,17 @@ def s3_status():
     if not d.get("ok"):
         print(f"  错误: {d.get('error', '未知')}")
         return
-    print(f"  就绪: {d.get('ready')}")
-    print(f"  总账号: {d.get('total_accounts', 0)}")
-    print(f"  活跃账号: {d.get('active_accounts', 0)}")
-    print(f"  降级账号: {d.get('degraded_accounts', 0)}")
-    print(f"  不可用账号: {d.get('unavailable_accounts', 0)}")
+    print(f"  就绪: {_ok('是') if d.get('ready') else _err('否')}")
+    print(f"  总账号: {C.C}{d.get('total_accounts', 0)}{C.RST}")
+    print(f"  活跃账号: {_ok(str(d.get('active_accounts', 0)))}")
+    print(f"  降级账号: {_warn(str(d.get('degraded_accounts', 0))) if d.get('degraded_accounts',0) else str(d.get('degraded_accounts', 0))}")
+    print(f"  不可用账号: {_err(str(d.get('unavailable_accounts', 0))) if d.get('unavailable_accounts',0) else str(d.get('unavailable_accounts', 0))}")
     print(f"  哈希环: {d.get('hash_ring_size', 0)}")
-    print(f"  --- 全局统计 ---")
-    print(f"  A类操作: {d.get('total_a_ops', 0)}")
-    print(f"  B类操作: {d.get('total_b_ops', 0)}")
-    print(f"  存储用量: {d.get('total_storage_mb', 0)}MB")
-    print(f"  --- 来源拆分 ---")
+    print(f"  {_bold('--- 全局统计 ---')}")
+    print(f"  {_dim('A类操作:')} {C.P}{d.get('total_a_ops', 0)}{C.RST}")
+    print(f"  {_dim('B类操作:')} {C.P}{d.get('total_b_ops', 0)}{C.RST}")
+    print(f"  {_dim('存储用量:')} {C.C}{d.get('total_storage_mb', 0)}{C.RST}MB")
+    print(f"  {_bold('--- 来源拆分 ---')}")
     print(f"  Manager: A={d.get('manager_a_ops', 0)} B={d.get('manager_b_ops', 0)} 存储={d.get('manager_storage_mb', 0)}MB")
     w_cnt = d.get("worker_count", 0)
     if w_cnt:
@@ -498,7 +498,8 @@ def backup_history(inst_id):
         status = h.get("status", "?")
         size = h.get("size_bytes", 0)
         size_mb = round(size / 1048576, 1) if size else 0
-        print(f"  {ts} [{status}] {size_mb}MB A={h.get('a_delta',0)} B={h.get('b_delta',0)}")
+        _status = _ok(status) if status == "success" else _err(status)
+        print(f"  {ts} [{_status}] {C.C}{size_mb}{C.RST}MB {_dim(f'A={h.get("a_delta",0)} B={h.get("b_delta",0)}')}")
         if h.get("log"):
             print(f"    {h['log'][:80]}")
     if not history:
@@ -559,7 +560,7 @@ def worker_stats(inst_id):
     d = api.get(f"/api/instances/{inst_id}/stats")
     if not d.get("ok"):
         print(f"  错误: {d.get('error', '未知')}"); return
-    print(f"  === {inst_id} 统计 ===")
+    print(f"  {_bold(f'=== {inst_id} 统计 ===')}")
     print(f"  A类总次数: {d.get('a_count_total', 0)}")
     print(f"  B类总次数: {d.get('b_count_total', 0)}")
     print(f"  存储用量: {d.get('storage_mb', 0)}MB")
