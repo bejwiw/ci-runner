@@ -518,6 +518,44 @@ class S3Pool:
         logger.info(f"[s3] 分片下载完成: {key} ({num_chunks}块)")
         return True
 
+
+    def get_storage_size(self, key):
+        """查询key在S3中的实际存储大小（恢复前调用）"""
+        if not self._initialized:
+            return 0
+        # 先查manifest
+        manifest_data = self.get(f"{key}.manifest")
+        if manifest_data:
+            import json
+            manifest = json.loads(manifest_data)
+            return manifest.get("total_size", 0)
+        # 非分片文件，查key本身
+        data = self.get(key)
+        return len(data) if data else 0
+
+    def query_bucket_sizes(self, account_indices=None, concurrency=20):
+        """并发查询多个桶的存储大小和对象数（用S3兼容API list_objects_v2）"""
+        if not self._initialized:
+            return {}
+        if account_indices is None:
+            account_indices = list(range(min(20, len(self._accounts))))
+        results = {}
+        def _query(idx):
+            try:
+                client = self._get_client(idx)
+                bucket = self._accounts[idx - 1]["bucket"] if idx > 0 else self._bootstrap["bucket"]
+                resp = client._client.list_objects_v2(Bucket=bucket, MaxKeys=1000)
+                total = sum(obj.get("Size", 0) for obj in resp.get("Contents", []))
+                count = resp.get("KeyCount", 0)
+                return idx, {"bucket": bucket, "size": total, "count": count}
+            except Exception as e:
+                return idx, {"bucket": "?", "size": 0, "count": 0, "error": str(e)[:100]}
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            for idx, info in executor.map(_query, account_indices):
+                results[idx] = info
+        return results
+
     # ==================== 状态查询 ====================
     def get_status(self):
         if not self._initialized:

@@ -89,6 +89,9 @@ class ProcessManager:
         os.makedirs(os.path.dirname(tmp), exist_ok=True)
         if self.s3pool and self.s3pool.is_ready():
             try:
+                _psize = self.s3pool.get_storage_size(key)
+                if _psize > 0:
+                    logger.info(f"[process] 要恢复快照: {_psize/1048576:.1f}MB")
                 if self.s3pool.get_to_file(key, tmp):
                     pbackup.unpack_processes_from_file(tmp)
                     logger.info(f"[process] 快照从 S3 恢复")
