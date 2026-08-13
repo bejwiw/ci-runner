@@ -154,24 +154,27 @@ def snapshot(reason="periodic"):
 
 
 def pack_processes_to_disk():
-    """打包processes目录到磁盘文件（排除pid文件）"""
+    """打包processes目录到磁盘文件（zstd压缩，排除pid文件）"""
     if not os.path.isdir(pconfig.proc_dir()):
         return None
-    tmp = os.path.join("/tmp/ghbox_backup", "proc_backup.tar.gz")
+    tmp = os.path.join("/tmp/ghbox_backup", "proc_backup.tar.zst")
     os.makedirs(os.path.dirname(tmp), exist_ok=True)
-    with tarfile.open(tmp, "w:gz") as tar:
-        tar.add(pconfig.proc_dir(), arcname="processes", filter=lambda info: None if info.name.endswith("/pid") or info.name.endswith("/pid/") else info)
+    import subprocess
+    subprocess.run(["sudo", "tar", "--zstd", "-cf", tmp, "-C", config.FILES_DIR,
+                     "--exclude=pid", "processes"], timeout=120)
     return tmp
 
 
 def unpack_processes_from_file(file_path):
-    """从磁盘文件解包"""
+    """从磁盘文件解包（自动检测zstd/gzip）"""
+    import subprocess
     try:
-        with tarfile.open(file_path, "r:gz") as tar:
-            try:
-                tar.extractall(path=config.FILES_DIR, filter="tar")
-            except TypeError:
-                tar.extractall(path=config.FILES_DIR)
+        with open(file_path, "rb") as _f:
+            _hdr = _f.read(4)
+        if _hdr[:4] == b"\x28\xb5\x2f\xfd":
+            subprocess.run(["sudo", "tar", "--zstd", "-xf", file_path, "-C", config.FILES_DIR], timeout=120)
+        else:
+            subprocess.run(["sudo", "tar", "xzf", file_path, "-C", config.FILES_DIR], timeout=120)
         logger.info("[backup] 进程快照解包完成(磁盘)")
         return True
     except Exception as e:

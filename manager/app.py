@@ -251,6 +251,73 @@ def s3_health():
 
 # ==================== 启动入口 ====================
 
+
+# ==================== Worker统计API ====================
+@app.route("/api/instances/<inst_id>/backup-history")
+@require_auth
+def backup_history(inst_id):
+    stats = store.get_worker_stats(inst_id)
+    return jsonify(ok=True, history=stats.get("backup_history", []))
+
+@app.route("/api/instances/<inst_id>/restore-history")
+@require_auth
+def restore_history(inst_id):
+    stats = store.get_worker_stats(inst_id)
+    return jsonify(ok=True, history=stats.get("restore_history", []))
+
+@app.route("/api/instances/<inst_id>/timeline")
+@require_auth
+def worker_timeline(inst_id):
+    stats = store.get_worker_stats(inst_id)
+    return jsonify(ok=True, timeline=stats.get("timeline", []))
+
+@app.route("/api/instances/<inst_id>/stats")
+@require_auth
+def worker_stats_api(inst_id):
+    stats = store.get_worker_stats(inst_id)
+    hb = state.worker_heartbeats.get(inst_id, {})
+    return jsonify(ok=True, **stats,
+        last_seen=hb.get("last_seen", 0),
+        procs=hb.get("procs", 0),
+        disk_pct=hb.get("disk_pct", 0))
+
+@app.route("/api/accounts/banned")
+@require_auth
+def banned_accounts():
+    result = []
+    for name, acc in accounts._accounts.items():
+        if acc.get("status") == "banned" or acc.get("banned"):
+            result.append({
+                "name": name,
+                "repo": acc.get("repo", ""),
+                "banned_at": acc.get("banned_at", ""),
+                "reason": acc.get("banned_reason", "unknown"),
+            })
+    return jsonify(ok=True, banned=result, total=len(result))
+
+@app.route("/api/s3/workers")
+@require_auth
+def s3_workers():
+    """查看每个worker的S3状态"""
+    result = []
+    for inst_id, hb in state.worker_heartbeats.items():
+        s3 = hb.get("s3", {})
+        wstats = store.get_worker_stats(inst_id)
+        result.append({
+            "instance": inst_id,
+            "last_seen": hb.get("last_seen", 0),
+            "active": s3.get("active", 0),
+            "degraded": s3.get("degraded", 0),
+            "unavailable": s3.get("unavailable", 0),
+            "a_ops_total": wstats.get("a_count_total", 0),
+            "b_ops_total": wstats.get("b_count_total", 0),
+            "storage_mb": wstats.get("storage_mb", 0),
+            "procs": hb.get("procs", 0),
+            "disk_pct": hb.get("disk_pct", 0),
+            "last_backup": wstats.get("last_backup", 0),
+        })
+    return jsonify(ok=True, workers=result, total=len(result))
+
 def run():
     state.leader = core_lock.LeaderLock(backend="release")
     state.leader.acquire()

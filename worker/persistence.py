@@ -64,7 +64,7 @@ def backup_files_to_bytes():
     if not os.path.isdir(config.FILES_DIR):
         return None
     result = subprocess.run(
-        ["sudo", "tar", "czf", "-", "-C", os.path.dirname(config.FILES_DIR), os.path.basename(config.FILES_DIR)],
+        ["sudo", "tar", "--zstd", "-cf", "-", "-C", os.path.dirname(config.FILES_DIR), os.path.basename(config.FILES_DIR)],
         capture_output=True, timeout=180)
     if result.returncode != 0:
         logger.error(f"[persist] 文件打包失败: {result.stderr.decode(errors='replace')[:200]}")
@@ -214,7 +214,7 @@ def backup_files_to_disk():
     tmp = os.path.join(TMP_DIR, "backup_files.tar.gz")
     try:
         result = subprocess.run(
-            ["sudo", "tar", "czf", tmp, "-C", os.path.dirname(config.FILES_DIR), os.path.basename(config.FILES_DIR)],
+            ["sudo", "tar", "--zstd", "-cf", tmp, "-C", os.path.dirname(config.FILES_DIR), os.path.basename(config.FILES_DIR)],
             capture_output=True, timeout=300)
         subprocess.run(["sudo", "chown", "runner:runner", tmp], timeout=5)
         if result.returncode != 0:
@@ -229,8 +229,12 @@ def backup_files_to_disk():
 def restore_files_from_file(file_path):
     """从磁盘文件解包"""
     try:
+        # 检测压缩格式：zstd或gzip
+        with open(file_path, "rb") as _f:
+            _hdr = _f.read(4)
+        _tar_flag = "--zstd" if _hdr[:4] == b"\x28\xb5\x2f\xfd" else "xzf"
         result = subprocess.run(
-            ["sudo", "tar", "xzf", file_path, "-C", os.path.dirname(config.FILES_DIR)],
+            ["sudo", "tar", _tar_flag if _tar_flag == "xzf" else "--zstd", "-xf" if _tar_flag == "--zstd" else "-xzf", file_path, "-C", os.path.dirname(config.FILES_DIR)],
             capture_output=True, timeout=300)
         if result.returncode != 0:
             logger.error(f"[persist] 文件解压失败: {result.stderr.decode(errors='replace')[:200]}")
@@ -254,3 +258,84 @@ def save_prev_backup(inst_cfg=None):
             releases.upload_chunked(f"{db_asset}.bak", blob)
     except Exception as e:
         logger.warning(f"[persist] 保存快照失败: {e}")
+
+# ==================== 操作统计（stats.json） ====================
+STATS_FILE = os.path.join(config.FILES_DIR, "stats.json")
+
+def load_stats():
+    """读取操作统计"""
+    try:
+        with open(STATS_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {"pending_a": 0, "pending_b": 0, "storage_mb": 0,
+                "backup_history": [], "restore_history": [], "timeline": []}
+
+def save_stats(stats):
+    """保存操作统计"""
+    try:
+        with open(STATS_FILE, "w") as f:
+            json.dump(stats, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f"[persist] stats保存失败: {e}")
+
+def record_backup(status, size_bytes, log_msg, a_delta=0, b_delta=0):
+    """记录备份操作"""
+    stats = load_stats()
+    stats["pending_a"] = stats.get("pending_a", 0) + a_delta
+    stats["pending_b"] = stats.get("pending_b", 0) + b_delta
+    stats["storage_mb"] = round(size_bytes / (1024 * 1024), 1) if size_bytes else 0
+    entry = {
+        "timestamp": time.time(),
+        "status": status,
+        "size_bytes": size_bytes,
+        "a_delta": a_delta, "b_delta": b_delta,
+        "log": log_msg[:500]
+    }
+    stats.setdefault("backup_history", []).insert(0, entry)
+    stats["backup_history"] = stats["backup_history"][:50]
+    stats.setdefault("timeline", []).insert(0, {"type": "backup", **entry})
+    stats["timeline"] = stats["timeline"][:100]
+    save_stats(stats)
+
+def record_restore(status, log_msg, a_delta=0, b_delta=0):
+    """记录恢复操作"""
+    stats = load_stats()
+    stats["pending_a"] = stats.get("pending_a", 0) + a_delta
+    stats["pending_b"] = stats.get("pending_b", 0) + b_delta
+    entry = {
+        "timestamp": time.time(),
+        "status": status,
+        "a_delta": a_delta, "b_delta": b_delta,
+        "log": log_msg[:500]
+    }
+    stats.setdefault("restore_history", []).insert(0, entry)
+    stats["restore_history"] = stats["restore_history"][:50]
+    stats.setdefault("timeline", []).insert(0, {"type": "restore", **entry})
+    stats["timeline"] = stats["timeline"][:100]
+    save_stats(stats)
+
+def get_pending():
+    """获取未上报的A类/B类次数"""
+    s = load_stats()
+    return s.get("pending_a", 0), s.get("pending_b", 0)
+
+def get_storage_mb():
+    """获取最新存储用量"""
+    return load_stats().get("storage_mb", 0)
+
+def clear_pending():
+    """清零未上报次数（上报成功后调用）"""
+    stats = load_stats()
+    stats["pending_a"] = 0
+    stats["pending_b"] = 0
+    save_stats(stats)
+
+def get_s3_delta(s3pool, before_a, before_b):
+    """获取S3操作的增量次数"""
+    if not s3pool or not s3pool.is_ready():
+        return 0, 0
+    s = s3pool.get_status()
+    after_a = s.get("total_a_ops", 0)
+    after_b = s.get("total_b_ops", 0)
+    return max(0, after_a - before_a), max(0, after_b - before_b)

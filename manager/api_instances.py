@@ -207,16 +207,28 @@ def instance_report(inst_id):
     d = request.get_json(silent=True) or {}
     # 存储worker上报的S3统计到worker_heartbeats
     _s3 = d.get("s3", {})
+    _pa = _s3.get("a_ops", 0)
+    _pb = _s3.get("b_ops", 0)
+    _storage = _s3.get("storage_mb", 0)
     state.worker_heartbeats[inst_id] = {
         "job_id": d.get("job_id", ""),
         "last_seen": time.time(),
         "s3": _s3,
         "procs": d.get("procs", 0),
         "disk_pct": d.get("disk_pct", 0),
-        "a_ops": _s3.get("a_ops", 0),
-        "b_ops": _s3.get("b_ops", 0),
-        "storage_mb": _s3.get("storage_mb", 0),
+        "a_ops": _pa,
+        "b_ops": _pb,
+        "storage_mb": _storage,
     }
+    # 累积到worker_stats（次数累积，存储实时）
+    if _pa > 0 or _pb > 0:
+        _wstats = store.get_worker_stats(inst_id)
+        _wstats["a_count_total"] = _wstats.get("a_count_total", 0) + _pa
+        _wstats["b_count_total"] = _wstats.get("b_count_total", 0) + _pb
+        _wstats["storage_mb"] = _storage
+        _wstats["last_backup"] = time.time()
+        _wstats["last_seen"] = time.time()
+        store.save_worker_stats(inst_id, _wstats)
     inst = store.get_instance(inst_id)
     if not inst:
         cfg = store.load_instance_config(inst_id)

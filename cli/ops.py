@@ -484,3 +484,86 @@ def s3_workers():
         print(f"    S3: active={w.get('active',0)} degraded={w.get('degraded',0)} unavailable={w.get('unavailable',0)}")
         print(f"    操作: A={w.get('a_ops',0)} B={w.get('b_ops',0)} 存储={w.get('storage_mb',0)}MB")
         print(f"    进程: {w.get('procs',0)} 磁盘: {w.get('disk_pct',0)}% 最后上报: {seen}\n")
+
+def backup_history(inst_id):
+    """查看备份历史"""
+    d = api.get(f"/api/instances/{inst_id}/backup-history")
+    if not d.get("ok"):
+        print(f"  错误: {d.get('error', '未知')}"); return
+    history = d.get("history", [])
+    print(f"  备份历史 ({len(history)}条):\n")
+    for h in history[:20]:
+        import time as _t
+        ts = _t.strftime("%m-%d %H:%M:%S", _t.localtime(h.get("timestamp", 0)))
+        status = h.get("status", "?")
+        size = h.get("size_bytes", 0)
+        size_mb = round(size / 1048576, 1) if size else 0
+        print(f"  {ts} [{status}] {size_mb}MB A={h.get('a_delta',0)} B={h.get('b_delta',0)}")
+        if h.get("log"):
+            print(f"    {h['log'][:80]}")
+    if not history:
+        print("  暂无历史")
+
+
+def restore_history(inst_id):
+    """查看恢复历史"""
+    d = api.get(f"/api/instances/{inst_id}/restore-history")
+    if not d.get("ok"):
+        print(f"  错误: {d.get('error', '未知')}"); return
+    history = d.get("history", [])
+    print(f"  恢复历史 ({len(history)}条):\n")
+    for h in history[:20]:
+        import time as _t
+        ts = _t.strftime("%m-%d %H:%M:%S", _t.localtime(h.get("timestamp", 0)))
+        status = h.get("status", "?")
+        print(f"  {ts} [{status}] A={h.get('a_delta',0)} B={h.get('b_delta',0)}")
+        if h.get("log"):
+            print(f"    {h['log'][:80]}")
+    if not history:
+        print("  暂无历史")
+
+
+def timeline(inst_id):
+    """查看完整时间线"""
+    d = api.get(f"/api/instances/{inst_id}/timeline")
+    if not d.get("ok"):
+        print(f"  错误: {d.get('error', '未知')}"); return
+    tl = d.get("timeline", [])
+    print(f"  时间线 ({len(tl)}条):\n")
+    for e in tl[:30]:
+        import time as _t
+        ts = _t.strftime("%m-%d %H:%M:%S", _t.localtime(e.get("timestamp", 0)))
+        etype = e.get("type", "?")
+        status = e.get("status", "?")
+        extra = f"{round(e.get('size_bytes',0)/1048576,1)}MB" if e.get("size_bytes") else ""
+        print(f"  {ts} [{etype}] [{status}] {extra}")
+    if not tl:
+        print("  暂无记录")
+
+
+def banned_accounts():
+    """查看被封账号"""
+    d = api.get("/api/accounts/banned")
+    if not d.get("ok"):
+        print(f"  错误: {d.get('error', '未知')}"); return
+    banned = d.get("banned", [])
+    print(f"  被封账号 ({len(banned)}个):\n")
+    for b in banned:
+        print(f"  {b.get('name','?')} | 仓库: {b.get('repo','?')} | 封禁: {b.get('banned_at','?')} | 原因: {b.get('reason','?')}")
+    if not banned:
+        print("  无被封账号")
+
+
+def worker_stats(inst_id):
+    """查看单个worker统计"""
+    d = api.get(f"/api/instances/{inst_id}/stats")
+    if not d.get("ok"):
+        print(f"  错误: {d.get('error', '未知')}"); return
+    print(f"  === {inst_id} 统计 ===")
+    print(f"  A类总次数: {d.get('a_count_total', 0)}")
+    print(f"  B类总次数: {d.get('b_count_total', 0)}")
+    print(f"  存储用量: {d.get('storage_mb', 0)}MB")
+    print(f"  最后备份: {d.get('last_backup', 0)}")
+    print(f"  最后恢复: {d.get('last_restore', 0)}")
+    print(f"  进程数: {d.get('procs', 0)}")
+    print(f"  磁盘: {d.get('disk_pct', 0)}%")

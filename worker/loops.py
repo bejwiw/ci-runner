@@ -54,16 +54,18 @@ def _report_running():
     mgr = config.MANAGER_HOST or "ghvps2.kekeke.cc.cd"
     while True:
         try:
-            # 收集S3摘要
+            # 收集S3摘要 + pending
             s3_summary = {"active": 0, "degraded": 0, "unavailable": 0}
             if state.s3pool and state.s3pool.is_ready():
                 s3_summary = state.s3pool.get_health()
                 s3_summary.pop("ready", None)
                 s3_summary.pop("total", None)
-                _st = state.s3pool.get_status()
-                s3_summary["a_ops"] = _st.get("total_a_ops", 0)
-                s3_summary["b_ops"] = _st.get("total_b_ops", 0)
-                s3_summary["storage_mb"] = _st.get("total_storage_mb", 0)
+            # 从stats.json获取pending和存储用量
+            from worker import persistence
+            _pa, _pb = persistence.get_pending()
+            s3_summary["a_ops"] = _pa
+            s3_summary["b_ops"] = _pb
+            s3_summary["storage_mb"] = persistence.get_storage_mb()
             # 收集进程数
             proc_count = 0
             if state.proc_mgr:
@@ -91,6 +93,9 @@ def _report_running():
                 "Content-Type": "application/json",
                 "User-Agent": "Mozilla/5.0 (ghbox-worker)"})
             urllib.request.urlopen(req, timeout=20)
+            # 上报成功，清零pending
+            from worker import persistence
+            persistence.clear_pending()
         except Exception as e:
             logger.warning(f"[report] 上报失败: {e}")
         time.sleep(60)

@@ -320,3 +320,28 @@ def next_inst_id():
         except (ValueError, KeyError):
             pass
     return f"inst{max(nums) + 1 if nums else 1}"
+
+# ==================== Worker操作统计 ====================
+def get_worker_stats(inst_id):
+    """获取worker操作统计（从S3）"""
+    if _s3pool and _s3pool.is_ready():
+        try:
+            data = _s3pool.get(f"meta/worker-stats/{inst_id}.json")
+            if data:
+                return json.loads(data.decode())
+        except Exception:
+            pass
+    return {
+        "a_count_total": 0, "b_count_total": 0, "storage_mb": 0,
+        "backup_history": [], "restore_history": [], "timeline": [],
+        "last_backup": 0, "last_restore": 0,
+    }
+
+def save_worker_stats(inst_id, stats):
+    """保存worker操作统计到S3"""
+    if _s3pool and _s3pool.is_ready():
+        try:
+            _s3pool.put(f"meta/worker-stats/{inst_id}.json",
+                        json.dumps(stats, ensure_ascii=False).encode())
+        except Exception as e:
+            logger.warning(f"[store] 保存worker stats失败: {e}")

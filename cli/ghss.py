@@ -11,7 +11,7 @@ ghbox CLI 客户端入口
 JSON 模式操作：
   instances / create / close <id> / accounts /
   add-account <name> <token> / tasks / logs [limit] /
-  s3-status / s3-workers / overview / processes <inst_id> /
+  s3-status / s3-workers / backup-history <inst_id> / restore-history <inst_id> / timeline <inst_id> / banned / worker-stats <inst_id> /
   snapshot <inst_id> / backup <inst_id> /
   exec <inst_id> <cmd> / health <inst_id>
   attack/start <inst_id> <target> [type] [port] [duration]
@@ -119,6 +119,16 @@ def json_mode(args):
         print(json_dumps(api.get("/api/s3/accounts")))
     elif op == "s3-workers":
         print(json_dumps(api.get("/api/s3/workers")))
+    elif op == "backup-history":
+        print(json_dumps(api.get(f"/api/instances/{args[0]}/backup-history")))
+    elif op == "restore-history":
+        print(json_dumps(api.get(f"/api/instances/{args[0]}/restore-history")))
+    elif op == "timeline":
+        print(json_dumps(api.get(f"/api/instances/{args[0]}/timeline")))
+    elif op == "banned":
+        print(json_dumps(api.get("/api/accounts/banned")))
+    elif op == "worker-stats":
+        print(json_dumps(api.get(f"/api/instances/{args[0]}/stats")))
     elif op == "logs-proxy" and len(args) > 1:
         print(json_dumps(api.get(f"/api/instances/{args[1]}/logs?limit=50")))
     elif op == "processes-proxy" and len(args) > 1:
