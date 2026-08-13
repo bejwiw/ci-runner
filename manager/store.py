@@ -32,7 +32,7 @@ _cache_time = {}
 def _s3_put_json(key, obj):
     """S3写入JSON到数据账号（一致性哈希分散）"""
     if _s3pool and _s3pool.is_ready():
-        return _s3pool.put(key, __json.dumps(obj, ensure_ascii=False).encode())
+        return _s3pool.put(key, _json.dumps(obj, ensure_ascii=False).encode())
     return False
 
 
@@ -42,7 +42,7 @@ def _s3_get_json(key):
         raw = _s3pool.get(key)
         if raw is not None:
             try:
-                return __json.loads(raw.decode())
+                return _json.loads(raw.decode())
             except Exception:
                 return None
     return None
