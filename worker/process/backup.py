@@ -129,6 +129,16 @@ def snapshot(reason="periodic"):
     configs = pconfig.scan_configs()
     if not configs:
         return 0, {}
+    # 清理processes目录中的残留（项目已删除但快照还在）
+    import shutil
+    proc_dir = pconfig.proc_dir()
+    if os.path.isdir(proc_dir):
+        for name in os.listdir(proc_dir):
+            if name == "manifest.json":
+                continue
+            if name not in configs:
+                shutil.rmtree(os.path.join(proc_dir, name), ignore_errors=True)
+                logger.info(f"[snapshot] 清理残留: {name}")
     saved = 0
     processes_meta = {}
     for name, cfg in configs.items():

@@ -31,7 +31,17 @@ MAX_SCAN = 10
 MAX_RETRIES = 3
 LARGE_FILE_THRESHOLD = 50 * 1024 * 1024  # 50MB以上分片
 CHUNK_SIZE = 10 * 1024 * 1024  # 10MB/块
-CHUNK_CONCURRENCY = 20  # 并发上传/下载线程数
+CHUNK_CONCURRENCY = 20
+
+
+def _dynamic_concurrency(file_size):
+    """根据文件大小动态调整并发数"""
+    if file_size < 50 * 1024 * 1024:
+        return 10
+    elif file_size < 500 * 1024 * 1024:
+        return 20
+    else:
+        return 30  # 并发上传/下载线程数
 RECOVERY_INTERVAL = 300
 DEGRADED_THRESHOLD = 3
 UNAVAILABLE_THRESHOLD = 5

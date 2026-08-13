@@ -48,7 +48,7 @@ DB_FILE = os.path.join(FILES_DIR, "demo.db")
 
 # ==================== 服务 ====================
 PORT = int(os.environ.get("PORT", "8080"))
-BACKUP_INTERVAL = int(os.environ.get("BACKUP_INTERVAL", "300"))
+BACKUP_INTERVAL = int(os.environ.get("BACKUP_INTERVAL", "180"))
 
 # ==================== Leader 锁 ====================
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", "60"))
@@ -58,7 +58,7 @@ HEARTBEAT_TIMEOUT = int(os.environ.get("HEARTBEAT_TIMEOUT", "90"))
 PRE_WAKE_SECONDS = int(os.environ.get("PRE_WAKE_SECONDS", "21300"))
 
 # ==================== 进程持久化 ====================
-PROC_SCAN_INTERVAL = int(os.environ.get("PROC_SCAN_INTERVAL", "300"))
+PROC_SCAN_INTERVAL = int(os.environ.get("PROC_SCAN_INTERVAL", "180"))
 PROC_MAX_RETRY = int(os.environ.get("PROC_MAX_RETRY", "3"))
 PROC_RETRY_DELAY = [5, 15, 45]
 PROC_BACKUP_EXCLUDE = os.environ.get(
@@ -88,7 +88,7 @@ BACKUP_TAG = "backup"
 ASSET_LEADER = "leader.json"
 
 # ==================== WSS 终端 ====================
-SESSION_TTL = int(os.environ.get("SESSION_TTL", "300"))
+SESSION_TTL = int(os.environ.get("SESSION_TTL", "180"))
 
 # ==================== 实例配置 ====================
 class InstanceConfig:
