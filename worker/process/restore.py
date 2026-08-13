@@ -10,6 +10,7 @@
 - restore_files()不再迁移cwd，cwd不在FILES_DIR下则跳过
 """
 import os
+import json
 import time
 import signal
 import subprocess
