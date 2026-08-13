@@ -105,6 +105,19 @@ class McpManager:
                 cwd=MCP_SERVER_DIR, capture_output=True, text=True, timeout=300)
             if r.returncode == 0:
                 logger.info("[mcp] npm install 完成")
+                # patch: 从IGNORE_DEFAULT_ARGS去掉--enable-unsafe-swiftshader（否则Playwright吞掉它，WebGL不可用）
+                _config_js = os.path.join(MCP_SERVER_DIR, "node_modules", "cloakbrowser", "dist", "config.js")
+                if os.path.exists(_config_js):
+                    with open(_config_js) as f:
+                        _content = f.read()
+                    if "--enable-unsafe-swiftshader" in _content:
+                        _content = _content.replace(
+                            '["--enable-automation", "--enable-unsafe-swiftshader"]',
+                            '["--enable-automation"]'
+                        )
+                        with open(_config_js, "w") as f:
+                            f.write(_content)
+                        logger.info("[mcp] CloakBrowser IGNORE_DEFAULT_ARGS patched")
                 # 安装 Playwright 浏览器
                 cloak_cache = os.path.expanduser("~/.cloakbrowser/")
                 if not os.path.isdir(cloak_cache) or not os.listdir(cloak_cache):
