@@ -137,8 +137,8 @@ def s3_status():
     if not state.s3pool:
         return jsonify(ok=False, error="S3 未初始化"), 503
     mgr = state.s3pool.get_status()
-    w_a = sum(hb.get("a_ops", 0) for hb in state.worker_heartbeats.values())
-    w_b = sum(hb.get("b_ops", 0) for hb in state.worker_heartbeats.values())
+    w_a = sum(hb.get("a_count_total", 0) for hb in state.worker_heartbeats.values())
+    w_b = sum(hb.get("b_count_total", 0) for hb in state.worker_heartbeats.values())
     w_st = sum(hb.get("storage_mb", 0) for hb in state.worker_heartbeats.values())
     w_cnt = len(state.worker_heartbeats)
     return jsonify(ok=True,

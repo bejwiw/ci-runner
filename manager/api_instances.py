@@ -234,6 +234,10 @@ def instance_report(inst_id):
     if _bh:
         _wstats["backup_history"] = _bh
     store.save_worker_stats(inst_id, _wstats)
+    # 同步累积统计到内存 heartbeats（供 s3/status 直接读取，不用查 S3）
+    _existing["a_count_total"] = _wstats.get("a_count_total", 0)
+    _existing["b_count_total"] = _wstats.get("b_count_total", 0)
+    state.worker_heartbeats[inst_id] = _existing
     inst = store.get_instance(inst_id)
     if not inst:
         cfg = store.load_instance_config(inst_id)
