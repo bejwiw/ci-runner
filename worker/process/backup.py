@@ -125,7 +125,11 @@ def unpack_processes_tar(data):
 
 
 def snapshot(reason="periodic"):
-    """扫描ghvps.json，备份所有配置的进程（不扫描/proc）"""
+    """扫描ghvps.json，备份所有配置的进程（不扫描/proc）
+
+    即使 backup_process_files 失败也加入 manifest（标记 files_backed=False），
+    确保恢复时 scan_configs 能扫到所有项目。
+    """
     configs = pconfig.scan_configs()
     if not configs:
         return 0, {}
@@ -142,24 +146,42 @@ def snapshot(reason="periodic"):
     saved = 0
     processes_meta = {}
     for name, cfg in configs.items():
+        pid = pconfig.read_pid_file(name)
         try:
-            pid = pconfig.read_pid_file(name)
             ok, size_mb, cfg = backup_process_files(cfg)
             if ok:
                 saved += 1
-                processes_meta[name] = {
-                    "name": name,
-                    "pid": pid,
-                    "cmdline": cfg.get("command", ""),
-                    "cwd": cfg.get("cwd", ""),
-                    "size_mb": round(size_mb, 2),
-                    "files_backed": cfg.get("files_backed", True),
-                    "saved_at": cfg.get("saved_at"),
-                }
         except Exception as e:
             logger.error(f"[snapshot] 备份 {name} 失败: {e}")
+            ok = False
+            size_mb = 0
+        # 无论成功失败都加入 manifest（确保恢复时不遗漏）
+        processes_meta[name] = {
+            "name": name,
+            "pid": pid,
+            "cmdline": cfg.get("command", ""),
+            "cwd": cfg.get("cwd", ""),
+            "size_mb": round(size_mb, 2) if size_mb else 0,
+            "files_backed": cfg.get("files_backed", ok),
+            "saved_at": cfg.get("saved_at"),
+        }
+    # 验证 manifest 完整性：确保 scan_configs 的所有项目都在
+    missing = set(configs.keys()) - set(processes_meta.keys())
+    if missing:
+        logger.warning(f"[snapshot] manifest 缺失 {len(missing)} 个项目，补全: {missing}")
+        for name in missing:
+            cfg = configs[name]
+            processes_meta[name] = {
+                "name": name,
+                "pid": None,
+                "cmdline": cfg.get("command", ""),
+                "cwd": cfg.get("cwd", ""),
+                "size_mb": 0,
+                "files_backed": False,
+                "saved_at": cfg.get("saved_at"),
+            }
     pconfig.save_manifest(processes_meta, reason=reason)
-    logger.info(f"[snapshot] {saved} 个进程持久化（{reason}）")
+    logger.info(f"[snapshot] {saved}/{len(configs)} 个进程持久化（{reason}）")
     return saved, processes_meta
 
 
