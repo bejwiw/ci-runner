@@ -327,7 +327,7 @@ def run():
 
     bootstrap = os.environ.get("S3_BOOTSTRAP", "")
     if bootstrap:
-        state.s3pool = S3Pool(bootstrap, config.S3_ENDPOINT, config.S3_REGION)
+        state.s3pool = S3Pool(bootstrap, config.S3_ENDPOINT, config.S3_REGION, owner="manager")
         if state.s3pool.init():
             store.set_s3pool(state.s3pool)
             logger.info("[boot] S3 池初始化成功")

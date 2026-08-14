@@ -84,7 +84,7 @@ def _parse_accounts(text):
 class S3Pool:
     """S3 多账号存储池（一致性哈希 + 账号状态机）"""
 
-    def __init__(self, bootstrap_creds, endpoint, region):
+    def __init__(self, bootstrap_creds, endpoint, region, owner="worker"):
         parts = bootstrap_creds.split("|")
         self._bootstrap = {
             "access_key": parts[0],
@@ -93,6 +93,7 @@ class S3Pool:
         }
         self.endpoint = endpoint
         self.region = region
+        self._owner = owner
         self._accounts = []
         self._hash_ring = HashRing(virtual_nodes=150)
         self._counters = {}
@@ -405,7 +406,7 @@ class S3Pool:
                     logger.info(f"[s3] 账号{idx} 月度重置")
 
     # ==================== 计数器持久化 ====================
-    _STATE_KEY = "meta/s3-counters.json"
+    # 计数器持久化 key（按 owner 区分，防止 Manager/Worker 互相覆盖）
 
     def save_state(self):
         """持久化计数器到 bootstrap 桶（防止重启归零）"""
@@ -415,7 +416,7 @@ class S3Pool:
             state = {str(idx): dict(c) for idx, c in self._counters.items()}
         try:
             data = json.dumps(state, ensure_ascii=False).encode()
-            self._get_client(0).put(self._STATE_KEY, data)
+            self._get_client(0).put(f"meta/s3-counters-{self._owner}.json", data)
             logger.info(f"[s3] 计数器已持久化 ({len(state)} 账号)")
         except Exception as e:
             logger.warning(f"[s3] 计数器持久化失败: {e}")
@@ -423,7 +424,7 @@ class S3Pool:
     def load_state(self):
         """从 bootstrap 桶恢复计数器"""
         try:
-            raw = self._get_client(0).get(self._STATE_KEY)
+            raw = self._get_client(0).get(f"meta/s3-counters-{self._owner}.json")
             if not raw:
                 return
             state = json.loads(raw.decode())
