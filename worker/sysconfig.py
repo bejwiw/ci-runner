@@ -31,21 +31,21 @@ def backup_system_config():
                 dst = os.path.join(svc_dir, f)
                 try:
                     shutil.copy2(src, dst)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[sysconfig] 文件操作失败: {e}")
     # crontab
     try:
         r = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
         if r.returncode == 0 and r.stdout.strip():
             with open(os.path.join(config.SYSCONFIG_DIR, "crontab.txt"), "w") as f:
                 f.write(r.stdout)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[sysconfig] 操作失败: {e}")
     # hosts
     try:
         shutil.copy2("/etc/hosts", os.path.join(config.SYSCONFIG_DIR, "hosts"))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[sysconfig] 操作失败: {e}")
     logger.info("[sysconfig] 系统配置已备份")
 
 
@@ -81,6 +81,6 @@ def restore_system_config():
     if os.path.exists(hosts_path):
         try:
             subprocess.run(["sudo", "cp", hosts_path, "/etc/hosts"], timeout=10)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[sysconfig] 操作失败: {e}")
     logger.info("[sysconfig] 系统配置恢复完成")

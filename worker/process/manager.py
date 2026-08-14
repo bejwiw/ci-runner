@@ -75,8 +75,8 @@ class ProcessManager:
             logger.info(f"[process] 快照已存入 Releases ({file_size} 字节)")
         try:
             os.remove(tmp)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[process] 操作失败: {e}")
 
     def _download_snapshot(self):
         """下载进程快照。S3 分片优先，Releases 降级。"""
@@ -97,8 +97,8 @@ class ProcessManager:
                     logger.info(f"[process] 快照从 S3 恢复")
                     try:
                         os.remove(tmp)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[process] 上传快照失败: {e}")
                     return
             except Exception as e:
                 logger.warning(f"[process] S3 快照下载失败: {e}")
@@ -110,8 +110,8 @@ class ProcessManager:
             pbackup.unpack_processes_from_file(tmp)
             try:
                 os.remove(tmp)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[process] 清理异常: {e}")
             logger.info(f"[process] 快照从 Releases 恢复")
 
     def final_snapshot(self):

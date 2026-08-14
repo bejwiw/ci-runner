@@ -57,7 +57,7 @@ def install_deps(cfg):
             # 遇到权限错误，sudo chown修改目录权限后重试
             if "EACCES" in _stderr or "EACCES" in _stdout or "permission denied" in _stderr.lower():
                 logger.warning(f"[restore] {name} 权限错误，自动修复权限后重试")
-                subprocess.run(f"sudo chown -R runner:runner {cwd}", shell=True, timeout=30)
+                subprocess.run(f"sudo chown -R $(whoami):$(whoami) {cwd}", shell=True, timeout=30)
                 r = subprocess.run(
                     cmd, shell=True, capture_output=True, text=True,
                     timeout=180, cwd=cwd, executable="/bin/bash")
@@ -119,8 +119,8 @@ def stop_process(name, cfg=None, pid=None):
         time.sleep(1.5)
         if utils.is_alive(pid):
             os.kill(pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
+    except (ProcessLookupError, PermissionError) as e:
+        logger.debug(f"[restore] 杀进程失败: {e}")
     pconfig.delete_pid_file(name)
     logger.info(f"[stop] {name} (pid={pid})")
     return True, "已停止"

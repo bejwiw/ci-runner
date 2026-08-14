@@ -90,10 +90,10 @@ def _reader(proc):
             if line.startswith("{"):
                 try:
                     attack_state["stats"] = json.loads(line)
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as e:
+                    logger.debug(f"[attack] reader异常: {e}")
+    except Exception as e:
+        logger.debug(f"[attack] 操作失败: {e}")
     finally:
         attack_state["running"] = False
         attack_state["proc"] = None
@@ -105,8 +105,8 @@ def stop_attack():
             os.killpg(os.getpgid(attack_state["proc"].pid), signal.SIGTERM)
             time.sleep(1)
             os.killpg(os.getpgid(attack_state["proc"].pid), signal.SIGKILL)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[attack] 操作失败: {e}")
     attack_state.update({"running": False, "proc": None, "pid": None})
     return True, "攻击已停止"
 

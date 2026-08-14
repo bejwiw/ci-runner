@@ -100,8 +100,8 @@ def _tune_network():
     for c in cmds:
         try:
             subprocess.run(c, shell=True, timeout=5)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[boot] 操作失败: {e}")
     logger.info("[tune] 网络参数已优化")
 
 
@@ -115,8 +115,8 @@ def _system_trim():
         try:
             subprocess.run(f"sudo systemctl stop {svc} 2>/dev/null", shell=True, timeout=10)
             subprocess.run(f"sudo systemctl disable {svc} 2>/dev/null", shell=True, timeout=10)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[boot] 操作失败: {e}")
     logger.info("[trim] 系统瘦身完成")
 
 

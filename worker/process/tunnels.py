@@ -40,8 +40,8 @@ def copy_tunnel_files(cfg, proc_name, base_dir):
         for f in os.listdir(tunnels_dir):
             try:
                 os.remove(os.path.join(tunnels_dir, f))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[tunnel] 复制凭证失败: {e}")
     os.makedirs(tunnels_dir, exist_ok=True)
 
     for tunnel in tunnels:
@@ -163,8 +163,8 @@ def stop_tunnels(known_entry):
                 time.sleep(1)
                 if utils.is_alive(pid):
                     os.kill(pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+            except (ProcessLookupError, PermissionError) as e:
+                logger.debug(f"[tunnel] 停止进程失败: {e}")
         logger.info(f"[tunnel] 停止 {name} (pid={pid})")
     known_entry.pop("tunnel_pids", None)
 

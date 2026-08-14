@@ -53,8 +53,8 @@ class Session:
     def feed(self, data: bytes):
         try:
             self.stream.feed(data.decode("utf-8", errors="replace"))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[terminal] PTY操作失败: {e}")
 
     def get_screen(self):
         try:
@@ -72,8 +72,8 @@ class Session:
         try:
             os.write(self.fd, data)
             self.last_active = time.time()
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug(f"[terminal] PTY IO失败: {e}")
 
     def resize(self, rows, cols):
         try:
@@ -81,20 +81,20 @@ class Session:
             fcntl.ioctl(self.fd, termios.TIOCSWINSZ,
                         struct.pack("HHHH", rows, cols, 0, 0))
             self.screen.resize(rows, cols)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[terminal] PTY操作失败: {e}")
 
     def destroy(self):
         try:
             os.kill(self.pid, signal.SIGHUP)
             time.sleep(0.2)
             os.kill(self.pid, signal.SIGKILL)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[terminal] PTY操作失败: {e}")
         try:
             os.close(self.fd)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[terminal] PTY操作失败: {e}")
 
 
 def get_or_create_session(session_key):

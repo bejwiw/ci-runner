@@ -97,8 +97,8 @@ def restore_files_from_bytes(data):
     finally:
         try:
             os.remove(tmp)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[persist] S3操作失败: {e}")
 
 
 # ==================== 备份/恢复 ====================
@@ -148,8 +148,8 @@ def load_or_create(inst_cfg):
         restore_files_from_file(tmp_files)
     try:
         os.remove(tmp_files)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[persist] 操作失败: {e}")
 
     os.makedirs(config.FILES_DIR, exist_ok=True)
     return status_msg
@@ -164,8 +164,8 @@ def backup_database(inst_cfg=None):
         conn = _get_db()
         try:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[persist] S3操作失败: {e}")
     with open(config.DB_FILE, "rb") as f:
         data = f.read()
     # S3（不加密，S3本身私有访问）
@@ -205,8 +205,8 @@ def backup_files(inst_cfg=None):
     # 清理临时文件
     try:
         os.remove(tmp)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[persist] 操作失败: {e}")
     return size, parts
 
 

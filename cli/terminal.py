@@ -45,8 +45,8 @@ def _get_clean_screen(url, session):
             d = json.loads(r.read().decode())
             if d.get("ok"):
                 return d.get("screen", "")
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"\r\n[terminal] {e}\r\n")
     return ""
 
 
@@ -72,23 +72,23 @@ def connect_terminal(host):
             else:
                 sys.stdout.write(data)
             sys.stdout.flush()
-        except Exception:
-            pass
+        except Exception as e:
+            sys.stderr.write(f"\r\n[terminal] {e}\r\n")
 
     @sio.on("exit")
     def on_exit(data):
         try:
             sio.disconnect()
-        except Exception:
-            pass
+        except Exception as e:
+            sys.stderr.write(f"\r\n[terminal] {e}\r\n")
 
     @sio.event
     def connect():
         try:
             rows, cols = _get_term_size()
             sio.emit("resize", {"rows": rows, "cols": cols})
-        except Exception:
-            pass
+        except Exception as e:
+            sys.stderr.write(f"\r\n[terminal] {e}\r\n")
 
     @sio.event
     def disconnect():
@@ -104,8 +104,8 @@ def connect_terminal(host):
                     state["force_exit"] = True
                     try:
                         sio.disconnect()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        sys.stderr.write(f"\r\n[terminal] {e}\r\n")
                     break
                 if ch == KEY_CTRL_O:
                     screen = _get_clean_screen(url, session)
@@ -115,15 +115,15 @@ def connect_terminal(host):
                     continue
                 try:
                     sio.emit("input", ch)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    sys.stderr.write(f"\r\n[terminal] {e}\r\n")
+        except Exception as e:
+            sys.stderr.write(f"\r\n[terminal] {e}\r\n")
         finally:
             try:
                 sio.disconnect()
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"\r\n[terminal] {e}\r\n")
 
     def _connect():
         try:
@@ -182,5 +182,5 @@ def connect_terminal(host):
         if state["force_exit"]:
             try:
                 sio.disconnect()
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"\r\n[terminal] {e}\r\n")

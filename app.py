@@ -6,6 +6,7 @@ import config
 
 
 def main():
+    config.validate_config()
     if config.ROLE == "manager":
         from manager.app import run
         run()

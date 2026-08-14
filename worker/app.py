@@ -285,8 +285,8 @@ def _pty_reader(session_key, sid):
                 if wpid == sess.pid:
                     socketio.emit("exit", {"code": status}, to=sid)
                     break
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[worker] 信号处理异常: {e}")
 
 
 @socketio.on("connect")
@@ -321,8 +321,8 @@ def ws_resize(data):
     if sess:
         try:
             sess.resize(int(data.get("rows", 24)), int(data.get("cols", 80)))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[worker] pty读取异常: {e}")
 
 
 @socketio.on("disconnect")

@@ -114,8 +114,8 @@ def save_instances(instances):
             if old_count > 2 and new_count < old_count / 2:
                 logger.warning(f"[store] 拒绝数量骤减: {old_count}→{new_count}")
                 return False
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[store] S3 操作失败: {e}")
 
         # 写 S3（主）
         s3_ok = False
@@ -186,8 +186,8 @@ def save_tasks(tasks):
     if _s3pool and _s3pool.is_ready():
         try:
             _s3_put_json("meta/tasks.json", tasks)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[store] S3 操作失败: {e}")
     releases.save_json_protected("tasks.json.enc", tasks)
 
 
@@ -223,8 +223,8 @@ def delete_instance_config(inst_id):
     if _s3pool and _s3pool.is_ready():
         try:
             _s3pool.delete(_inst_config_key(inst_id))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[store] S3 操作失败: {e}")
     releases.delete_asset(f"inst-{inst_id}.json.enc")
 
 
@@ -319,8 +319,8 @@ def next_inst_id():
     for inst in instances:
         try:
             nums.append(int(inst["id"].replace("inst", "")))
-        except (ValueError, KeyError):
-            pass
+        except (ValueError, KeyError) as e:
+            logger.debug(f"[store] 实例ID解析失败: {e}")
     return f"inst{max(nums) + 1 if nums else 1}"
 
 # ==================== Worker操作统计 ====================
@@ -331,8 +331,8 @@ def get_worker_stats(inst_id):
             data = _s3pool.get(f"meta/worker-stats/{inst_id}.json")
             if data:
                 return _json.loads(data.decode())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[store] S3 操作失败: {e}")
     return {
         "a_count_total": 0, "b_count_total": 0, "storage_mb": 0,
         "backup_history": [], "restore_history": [], "timeline": [],

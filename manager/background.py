@@ -98,8 +98,8 @@ def _self_heal_instances():
                                     "status": "running", "url": f"https://{hostname}",
                                     "closed": False, "run_id": None,
                                 })
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[heal] 解密实例配置失败: {e}")
         except Exception as e:
             logger.warning(f"[heal] 扫描账号 {acc.get('name')} 失败: {e}")
     if result:

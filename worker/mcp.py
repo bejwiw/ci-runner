@@ -83,8 +83,8 @@ class McpManager:
             try:
                 with open(pkg_path) as f:
                     old_pkg = f.read()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[mcp] 操作失败: {e}")
         # 每次复制最新代码（幂等）
         self._copy_server_code()
         # 比较package.json是否变了
@@ -93,8 +93,8 @@ class McpManager:
             try:
                 with open(pkg_path) as f:
                     new_pkg = f.read()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[mcp] 操作失败: {e}")
         pkg_changed = old_pkg != new_pkg
         if pkg_changed and os.path.isdir(node_modules):
             # package.json变了，删除旧node_modules强制重装
@@ -166,13 +166,13 @@ class McpManager:
                     os.kill(old_pid, signal.SIGKILL)
                     logger.info(f"[mcp] 已清理旧 MCP 进程 (pid={old_pid})")
                     time.sleep(0.5)
-        except (ValueError, FileNotFoundError, ProcessLookupError, PermissionError):
-            pass
+        except (ValueError, FileNotFoundError, ProcessLookupError, PermissionError) as e:
+            logger.debug(f"[mcp] 清理旧进程失败: {e}")
         finally:
             try:
                 os.remove(MCP_PID_FILE)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[mcp] 操作失败: {e}")
 
     def _get_mcp_tunnel_token(self):
         if self.inst_cfg and self.inst_cfg.raw:
@@ -229,8 +229,8 @@ class McpManager:
             try:
                 with open(MCP_PID_FILE, "w") as f:
                     f.write(str(self.proc.pid))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[mcp] 操作失败: {e}")
             threading.Thread(target=self._read_output, daemon=True).start()
             self.ready = True
             logger.info(f"[mcp] 服务已启动 (pid={self.proc.pid}, port={MCP_PORT})")
@@ -246,8 +246,8 @@ class McpManager:
             for line in self.proc.stdout:
                 if line.strip():
                     logger.info(f"[mcp:node] {line.strip()[:300]}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[mcp] 操作失败: {e}")
 
     def stop(self):
         if self.proc:
@@ -255,16 +255,16 @@ class McpManager:
                 os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
                 time.sleep(1)
                 os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[mcp] 操作失败: {e}")
         self.proc = None
         if self.tunnel_mgr:
             self.tunnel_mgr.stop()
         self.ready = False
         try:
             os.remove(MCP_PID_FILE)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[mcp] PID文件清理失败: {e}")
         logger.info("[mcp] 服务已停止")
 
     def status(self):

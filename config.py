@@ -108,3 +108,51 @@ class InstanceConfig:
         self.account = cfg.get("account") or ""
         self.account_repo = cfg.get("account_repo") or ""
         self.raw = cfg
+
+# ==================== 配置校验 ====================
+def validate_config():
+    """启动时校验关键配置。致命错误直接退出，避免带着残缺配置运行。"""
+    import sys
+    errors = []
+    warnings = []
+
+    if not EXEC_TOKEN:
+        errors.append("EXEC_TOKEN 未配置（服务无鉴权）")
+    if DEMO_KEY:
+        try:
+            key_bytes = bytes.fromhex(DEMO_KEY)
+            if len(key_bytes) != 32:
+                errors.append(f"DEMO_KEY 应为32字节(64位hex)，当前{len(key_bytes)}字节")
+        except ValueError as e:
+            errors.append(f"DEMO_KEY 不是合法 hex: {e}")
+    elif ROLE == "worker":
+        warnings.append("DEMO_KEY 未配置（Releases 加密降级不可用）")
+
+    if not (1 <= PORT <= 65535):
+        errors.append(f"PORT 非法: {PORT}（应在1-65535）")
+
+    if BACKUP_INTERVAL < 30:
+        errors.append(f"BACKUP_INTERVAL={BACKUP_INTERVAL} 不能小于30秒")
+    if HEARTBEAT_TIMEOUT < HEARTBEAT_INTERVAL:
+        errors.append(f"HEARTBEAT_TIMEOUT({HEARTBEAT_TIMEOUT}) < HEARTBEAT_INTERVAL({HEARTBEAT_INTERVAL})")
+
+    _s3b = os.environ.get("S3_BOOTSTRAP", "")
+    if _s3b and _s3b.count("|") < 2:
+        errors.append("S3_BOOTSTRAP 格式应为 access_key|secret_key|bucket")
+
+    if ROLE == "manager":
+        if not GH_TOKEN:
+            errors.append("manager 角色需要 GH_TOKEN")
+        if not CF_EMAIL or not CF_API_KEY:
+            warnings.append("CF_EMAIL/CF_API_KEY 未配置（隧道管理不可用）")
+    elif ROLE == "worker":
+        if not MANAGER_HOST:
+            warnings.append("MANAGER_HOST 未配置（leader 选举 + 上报不可用）")
+
+    for w in warnings:
+        print(f"[WARN] {w}")
+    if errors:
+        for e in errors:
+            print(f"[FATAL] {e}")
+        sys.exit(1)
+    return True

@@ -21,27 +21,36 @@ from core.hashring import HashRing
 
 logger = log.setup_logger("s3")
 
-# 常量
-A_LIMIT = 9000
-B_LIMIT = 90000
-STORAGE_LIMIT = 4_500_000_000
+# ==================== 常量 ====================
+# Tigris 免费额度：每账号 5GB 永久存储，A类(PUT) 1万次/月，B类(GET) 10万次/月
+S3_PREFIX = "ghbox"  # S3 key 前缀
+A_LIMIT = 9000          # A类操作月度上限（预留余量）
+B_LIMIT = 90000          # B类操作月度上限（预留余量）
+STORAGE_LIMIT = 4_500_000_000  # 每账号存储上限 ~4.5GB（预留余量）
 ACCOUNTS_KEY = "meta/s3-accounts.txt"
 MAX_FALLBACK = 3
 MAX_SCAN = 10
 MAX_RETRIES = 3
-LARGE_FILE_THRESHOLD = 50 * 1024 * 1024  # 50MB以上分片
-CHUNK_SIZE = 10 * 1024 * 1024  # 10MB/块
+LARGE_FILE_THRESHOLD = 50 * 1024 * 1024
+CHUNK_SIZE = 10 * 1024 * 1024
 CHUNK_CONCURRENCY = 20
+# 动态并发参数
+CONC_SMALL = 10
+CONC_MEDIUM = 20
+CONC_LARGE = 30
+SMALL_FILE_BOUNDARY = 50 * 1024 * 1024
+MEDIUM_FILE_BOUNDARY = 500 * 1024 * 1024
+MAX_LIST_KEYS = 1000
 
 
 def _dynamic_concurrency(file_size):
     """根据文件大小动态调整并发数"""
-    if file_size < 50 * 1024 * 1024:
-        return 10
-    elif file_size < 500 * 1024 * 1024:
-        return 20
+    if file_size < SMALL_FILE_BOUNDARY:
+        return CONC_SMALL
+    elif file_size < MEDIUM_FILE_BOUNDARY:
+        return CONC_MEDIUM
     else:
-        return 30  # 并发上传/下载线程数
+        return CONC_LARGE
 RECOVERY_INTERVAL = 300
 DEGRADED_THRESHOLD = 3
 UNAVAILABLE_THRESHOLD = 5
@@ -295,12 +304,12 @@ class S3Pool:
             try:
                 from botocore.exceptions import ClientError
                 head = client._client.head_object(
-                    Bucket=client.bucket, Key=f"ghbox/{key}")
+                    Bucket=client.bucket, Key=f"{S3_PREFIX}/{key}")
                 file_size = head.get("ContentLength", 0) or 0
-            except ClientError:
-                pass
-            except Exception:
-                pass
+            except ClientError as e:
+                logger.debug(f"[s3] head_object {key} 失败: {e}")
+            except Exception as e:
+                logger.debug(f"[s3] head_object {key} 异常: {e}")
             client.delete(key)
             with self._lock:
                 self._counters[account_idx]["a_count"] += 1
@@ -610,7 +619,7 @@ class S3Pool:
             try:
                 client = self._get_client(idx)
                 bucket = self._accounts[idx - 1]["bucket"] if idx > 0 else self._bootstrap["bucket"]
-                resp = client._client.list_objects_v2(Bucket=bucket, MaxKeys=1000)
+                resp = client._client.list_objects_v2(Bucket=bucket, MaxKeys=MAX_LIST_KEYS)
                 total = sum(obj.get("Size", 0) for obj in resp.get("Contents", []))
                 count = resp.get("KeyCount", 0)
                 return idx, {"bucket": bucket, "size": total, "count": count}
@@ -718,13 +727,13 @@ class _S3Client:
             ),
         )
 
-    def put(self, key, data, prefix="ghbox"):
+    def put(self, key, data, prefix=S3_PREFIX):
         self._ensure_client()
         full_key = f"{prefix}/{key}" if prefix else key
         self._client.put_object(Bucket=self.bucket, Key=full_key, Body=data)
         return True
 
-    def get(self, key, prefix="ghbox"):
+    def get(self, key, prefix=S3_PREFIX):
         self._ensure_client()
         full_key = f"{prefix}/{key}" if prefix else key
         from botocore.exceptions import ClientError
@@ -737,7 +746,7 @@ class _S3Client:
                 return None
             raise
 
-    def delete(self, key, prefix="ghbox"):
+    def delete(self, key, prefix=S3_PREFIX):
         self._ensure_client()
         full_key = f"{prefix}/{key}" if prefix else key
         from botocore.exceptions import ClientError

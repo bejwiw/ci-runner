@@ -177,8 +177,8 @@ def json_mode(args):
                         if isinstance(entry, dict):
                             print(f"[{entry.get('level','')}] {entry.get('msg','')}")
                     seen = len(logs)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[cli] 错误: {e}", file=sys.stderr)
             _t.sleep(2)
 
     else:

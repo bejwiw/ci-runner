@@ -88,15 +88,15 @@ def _report_running():
                 try:
                     procs = state.proc_mgr.list_processes()
                     proc_count = len(procs)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[loops] S3摘要失败: {e}")
             # 收集磁盘
             disk_pct = 0
             try:
                 stats = log.get_resource_stats()
                 disk_pct = round(stats.get("disk_use_pct", 0), 1)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[loops] 进程数统计失败: {e}")
             url = f"https://{mgr}/api/instances/{config.INSTANCE_ID}/report"
             payload = json.dumps({
                 "token": config.EXEC_TOKEN,
@@ -218,8 +218,8 @@ def _disk_monitor_loop():
                                     subprocess.run(["sudo", "rm", "-rf", p], timeout=30)
                                 else:
                                     os.remove(p)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"[loops] 磁盘清理失败: {e}")
                 stats2 = log.get_resource_stats()
                 logger.info(f"[disk] 清理后 {stats2.get('disk_use_pct', 0)}%")
             elif pct >= config.DISK_WARN_PERCENT:

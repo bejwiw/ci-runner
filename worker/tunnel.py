@@ -62,7 +62,7 @@ class TunnelManager:
             try:
                 self.proc.terminate()
                 self.proc.kill()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[tunnel] stop异常: {e}")
         self.proc = None
         self.registered = False

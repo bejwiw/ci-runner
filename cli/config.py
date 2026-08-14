@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """CLI 配置：token / manager 地址 / 会话持久化"""
 import os
+import sys
 import uuid
 
 MANAGER = os.environ.get("GHBOX_MANAGER", "https://ghvps2.kekeke.cc.cd")
@@ -17,14 +18,14 @@ def load_session():
                 k = f.read().strip()
                 if k:
                     return k
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[config] 会话文件操作失败: {e}", file=sys.stderr)
     k = uuid.uuid4().hex
     try:
         with open(SESSION_FILE, "w") as f:
             f.write(k)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[config] 会话文件写入失败: {e}", file=sys.stderr)
     return k
 
 

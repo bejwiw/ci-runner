@@ -27,8 +27,8 @@ def _clear_dir(path):
         else:
             try:
                 os.remove(p)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[backup] 复制文件失败: {e}")
 
 
 def backup_process_files(cfg):

@@ -7,11 +7,15 @@ AES-256-GCM 加密模块
 """
 import json
 import os
-import base64
 
 from Crypto.Cipher import AES
 
 import config
+
+# ==================== 常量 ====================
+NONCE_LEN = 12   # GCM 标准 nonce 长度
+TAG_LEN = 16     # GCM 认证标签长度
+HEADER_LEN = NONCE_LEN + TAG_LEN  # 密文头部 = nonce + tag
 
 
 class CryptoError(Exception):
@@ -30,7 +34,7 @@ def _get_key():
 def encrypt_bytes(data: bytes) -> bytes:
     """加密字节流，返回 nonce(12) + tag(16) + ciphertext"""
     key = _get_key()
-    nonce = os.urandom(12)  # 12字节nonce（标准GCM，pycryptodome默认16字节会错位）
+    nonce = os.urandom(NONCE_LEN)
     cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
     ct, tag = cipher.encrypt_and_digest(data)
     return nonce + tag + ct
@@ -38,10 +42,12 @@ def encrypt_bytes(data: bytes) -> bytes:
 
 def decrypt_bytes(blob: bytes) -> bytes:
     """解密字节流"""
-    if not blob or len(blob) < 28:
-        raise CryptoError("密文长度非法")
+    if not blob or len(blob) < HEADER_LEN:
+        raise CryptoError(f"密文长度非法: {len(blob) if blob else 0} < {HEADER_LEN}")
     key = _get_key()
-    nonce, tag, ct = blob[:12], blob[12:28], blob[28:]
+    nonce = blob[:NONCE_LEN]
+    tag = blob[NONCE_LEN:HEADER_LEN]
+    ct = blob[HEADER_LEN:]
     cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
     try:
         return cipher.decrypt_and_verify(ct, tag)

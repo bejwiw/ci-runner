@@ -71,8 +71,8 @@ def delete_pid_file(name):
     """删PID文件"""
     try:
         os.remove(pid_file_path(name))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[config] 读取失败: {e}")
 
 
 def scan_configs():
@@ -158,8 +158,8 @@ def load_proc_config(name):
         try:
             with open(path) as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[config] 写PID失败: {e}")
     return None
 
 
