@@ -82,8 +82,9 @@ def test_constants():
     assert CONC_SMALL < CONC_MEDIUM < CONC_LARGE
 
 
-def test_put_file_deletes_old_manifest(monkeypatch, tmp_path):
-    """put_file 上传小文件后删除旧 manifest（防止 get_to_file 读旧版本）"""
+
+def test_get_to_file_prefers_single_file(monkeypatch, tmp_path):
+    """get_to_file 先查单文件（最新版本），有就不用查清单"""
     from core.s3 import S3Pool
     pool = S3Pool.__new__(S3Pool)
     pool._initialized = True
@@ -92,26 +93,26 @@ def test_put_file_deletes_old_manifest(monkeypatch, tmp_path):
         'get_nearby_accounts': lambda s, k, count=10: [1, 2]
     })()
     pool._counters = {0: {'status': 'active', 'a_count': 0, 'used_bytes': 0, 'b_count': 0, 'fail_count': 0},
-                      1: {'status': 'active', 'a_count': 0, 'used_bytes': 0, 'b_count': 0, 'fail_count': 0},
-                      2: {'status': 'active', 'a_count': 0, 'used_bytes': 0, 'b_count': 0, 'fail_count': 0}}
-    pool._clients = {}
-    pool._bootstrap = {'access_key': 'a', 'secret_key': 's', 'bucket': 'b'}
-    pool._accounts = []
+                      1: {'status': 'active', 'a_count': 0, 'used_bytes': 0, 'b_count': 0, 'fail_count': 0}}
     pool._lock = __import__('threading').RLock()
     pool._owner = 'test'
-    deleted = []
+    get_calls = []
     class FakeClient:
-        def put(self, key, data, prefix='ghbox'):
-            return True
         def get(self, key, prefix='ghbox'):
+            get_calls.append(key)
+            if key == 'inst-files/test/files.tar.gz':
+                return b'new_file_content'  # 单文件存在（新版本）
+            if key == 'inst-files/test/files.tar.gz.manifest':
+                return b'{"chunks": 5, "total_size": 999}'  # 旧 manifest
             return None
-        def delete(self, key, prefix='ghbox'):
-            deleted.append(key)
-            return True
     pool._get_client = lambda idx: FakeClient()
-    # 创建小文件
-    f = tmp_path / 'small.txt'
-    f.write_text('hello')
-    pool.put_file('inst-files/test/files.tar.gz', str(f))
-    # 应该删除 manifest
-    assert 'inst-files/test/files.tar.gz.manifest' in deleted
+    # 下载
+    out = str(tmp_path / 'out.tar.gz')
+    result = pool.get_to_file('inst-files/test/files.tar.gz', out)
+    assert result is True
+    # 读到的应该是单文件内容
+    with open(out, 'rb') as f:
+        assert f.read() == b'new_file_content'
+    # 不应该查 manifest（因为单文件已找到）
+    manifest_calls = [c for c in get_calls if 'manifest' in c]
+    assert len(manifest_calls) == 0

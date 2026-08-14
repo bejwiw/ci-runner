@@ -455,42 +455,15 @@ class S3Pool:
 
     # ==================== 分片存储（大文件）====================
     def put_file(self, key, file_path):
-        """从磁盘文件上传。>=50MB分片并发，<50MB直接上传。
-
-        小文件用 put 直接上传后必须删除旧的分片 manifest，
-        否则 get_to_file 会读到旧 manifest 下载旧版本。
-        manifest 可能因 put fallback 在任意账号上，需遍历删除。
-        """
+        """从磁盘文件上传。>=50MB分片并发，<50MB直接上传。"""
         if not self._initialized:
             return False
         file_size = os.path.getsize(file_path)
         if file_size < LARGE_FILE_THRESHOLD:
             with open(file_path, "rb") as f:
                 data = f.read()
-            result = self.put(key, data)
-            if result:
-                self._delete_manifest_everywhere(f"{key}.manifest")
-            return result
+            return self.put(key, data)
         return self._put_file_chunked(key, file_path, file_size)
-
-    def _delete_manifest_everywhere(self, manifest_key):
-        """遍历附近账号删除 manifest（put fallback 可能写到任意账号）"""
-        account_idx = self._hash_ring.get_account(manifest_key)
-        if account_idx is not None:
-            try:
-                self._get_client(account_idx).delete(manifest_key)
-            except Exception as e:
-                logger.debug(f"[s3] delete manifest account {account_idx}: {e}")
-        nearby = self._hash_ring.get_nearby_accounts(manifest_key, 50)
-        for alt_idx in nearby:
-            if alt_idx == account_idx:
-                continue
-            if self._counters.get(alt_idx, {}).get("status") == "unavailable":
-                continue
-            try:
-                self._get_client(alt_idx).delete(manifest_key)
-            except Exception as e:
-                logger.debug(f"[s3] delete manifest account {alt_idx}: {e}")
 
     def _put_file_chunked(self, key, file_path, file_size):
         """分片并发上传大文件"""
@@ -552,17 +525,19 @@ class S3Pool:
         return True
 
     def get_to_file(self, key, file_path):
-        """下载到磁盘文件。分片文件并发下载，普通文件直接下载。"""
+        """下载到磁盘文件。先查单文件（最新版本），没有再查清单走分片。"""
         if not self._initialized:
             return False
-        manifest_data = self.get(f"{key}.manifest")
-        if manifest_data is None:
-            data = self.get(key)
-            if data is None:
-                return False
+        # 先查单文件（如果存在就是最新版本，优先使用）
+        data = self.get(key)
+        if data is not None:
             with open(file_path, "wb") as f:
                 f.write(data)
             return True
+        # 单文件不存在，查清单走分片下载（大文件分片存储）
+        manifest_data = self.get(f"{key}.manifest")
+        if manifest_data is None:
+            return False
         manifest = json.loads(manifest_data)
         return self._get_chunked_to_file(key, manifest, file_path)
 
