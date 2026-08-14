@@ -481,7 +481,7 @@ class S3Pool:
                 self._get_client(account_idx).delete(manifest_key)
             except Exception as e:
                 logger.debug(f"[s3] delete manifest account {account_idx}: {e}")
-        nearby = self._hash_ring.get_nearby_accounts(manifest_key, MAX_SCAN)
+        nearby = self._hash_ring.get_nearby_accounts(manifest_key, 50)
         for alt_idx in nearby:
             if alt_idx == account_idx:
                 continue
