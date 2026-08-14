@@ -80,6 +80,11 @@ def _report_running():
             _pa, _pb = _stats.get("pending_a", 0), _stats.get("pending_b", 0)
             s3_summary["a_ops"] = _pa
             s3_summary["b_ops"] = _pb
+            # 上报 S3Pool 累积统计（含恢复时的 B类操作，pending 只记备份增量）
+            if state.s3pool and state.s3pool.is_ready():
+                _s3status = state.s3pool.get_status()
+                s3_summary["a_ops_total"] = _s3status.get("total_a_ops", 0)
+                s3_summary["b_ops_total"] = _s3status.get("total_b_ops", 0)
             s3_summary["storage_mb"] = _stats.get("storage_mb", 0)
             s3_summary["backup_history"] = _stats.get("backup_history", [])
             # 收集进程数

@@ -77,6 +77,14 @@ def deferred_init():
         state.leader.acquire()
         if state.leader.is_leader:
             threading.Thread(target=state.leader.heartbeat_loop, daemon=True).start()
+        else:
+            # acquire 失败（有别的活跃 leader），启动 follower_loop 等待升级
+            def _on_promote():
+                logger.info("[boot] Follower 升级为 Leader，启动备份循环")
+                from worker.loops import _backup_loop
+                threading.Thread(target=_backup_loop, daemon=True).start()
+            threading.Thread(target=state.leader.follower_loop,
+                             args=(_on_promote,), daemon=True).start()
     except Exception as e:
         logger.error(f"[boot] Leader 锁失败: {e}")
 

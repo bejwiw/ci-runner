@@ -224,9 +224,9 @@ def instance_report(inst_id):
     state.worker_heartbeats[inst_id] = _existing
     # 累积到worker_stats（次数累积，存储实时，历史每次更新）
     _wstats = store.get_worker_stats(inst_id)
-    if _pa > 0 or _pb > 0:
-        _wstats["a_count_total"] = _wstats.get("a_count_total", 0) + _pa
-        _wstats["b_count_total"] = _wstats.get("b_count_total", 0) + _pb
+    # 用 worker 上报的 S3Pool 累积值（含恢复 B类操作），不用 pending 累加
+    _wstats["a_count_total"] = _s3.get("a_ops_total", _wstats.get("a_count_total", 0))
+    _wstats["b_count_total"] = _s3.get("b_ops_total", _wstats.get("b_count_total", 0))
     _wstats["storage_mb"] = _storage
     _wstats["last_backup"] = time.time()
     _wstats["last_seen"] = time.time()
