@@ -87,8 +87,13 @@ def test_put_file_deletes_old_manifest(monkeypatch, tmp_path):
     from core.s3 import S3Pool
     pool = S3Pool.__new__(S3Pool)
     pool._initialized = True
-    pool._hash_ring = type('R', (), {'get_account': lambda s, k: 0})()
-    pool._counters = {0: {'status': 'active', 'a_count': 0, 'used_bytes': 0, 'b_count': 0, 'fail_count': 0}}
+    pool._hash_ring = type('R', (), {
+        'get_account': lambda s, k: 0,
+        'get_nearby_accounts': lambda s, k, count=10: [1, 2]
+    })()
+    pool._counters = {0: {'status': 'active', 'a_count': 0, 'used_bytes': 0, 'b_count': 0, 'fail_count': 0},
+                      1: {'status': 'active', 'a_count': 0, 'used_bytes': 0, 'b_count': 0, 'fail_count': 0},
+                      2: {'status': 'active', 'a_count': 0, 'used_bytes': 0, 'b_count': 0, 'fail_count': 0}}
     pool._clients = {}
     pool._bootstrap = {'access_key': 'a', 'secret_key': 's', 'bucket': 'b'}
     pool._accounts = []
@@ -100,8 +105,10 @@ def test_put_file_deletes_old_manifest(monkeypatch, tmp_path):
             return True
         def get(self, key, prefix='ghbox'):
             return None
+        def delete(self, key, prefix='ghbox'):
+            deleted.append(key)
+            return True
     pool._get_client = lambda idx: FakeClient()
-    pool.delete = lambda key: deleted.append(key)
     # 创建小文件
     f = tmp_path / 'small.txt'
     f.write_text('hello')
