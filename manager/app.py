@@ -212,17 +212,12 @@ def worker_heartbeat():
     if inst_id:
         _s3 = d.get("s3", {})
         _existing = state.worker_heartbeats.get(inst_id, {})
+        # 心跳只更新 leader 专用字段，不覆盖 instance_report 设的 s3/procs/storage 等
         _existing.update({
             "job_id": d.get("job_id", ""),
             "heartbeat": time.time(),
             "last_seen": time.time(),
             "version": d.get("version", "unknown"),
-            "s3": _s3,
-            "procs": d.get("procs", 0),
-            "disk_pct": d.get("disk_pct", 0),
-            "a_ops": _s3.get("a_ops", 0),
-            "b_ops": _s3.get("b_ops", 0),
-            "storage_mb": _s3.get("storage_mb", 0),
         })
         state.worker_heartbeats[inst_id] = _existing
     return jsonify(ok=True)
