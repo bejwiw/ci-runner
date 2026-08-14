@@ -455,14 +455,22 @@ class S3Pool:
 
     # ==================== 分片存储（大文件）====================
     def put_file(self, key, file_path):
-        """从磁盘文件上传。>=50MB分片并发，<50MB直接上传。"""
+        """从磁盘文件上传。>=50MB分片并发，<50MB直接上传。
+
+        小文件用 put 直接上传后必须删除旧的分片 manifest，
+        否则 get_to_file 会读到旧 manifest 下载旧版本。
+        """
         if not self._initialized:
             return False
         file_size = os.path.getsize(file_path)
         if file_size < LARGE_FILE_THRESHOLD:
             with open(file_path, "rb") as f:
                 data = f.read()
-            return self.put(key, data)
+            result = self.put(key, data)
+            # 删除旧的分片 manifest（防止 get_to_file 读旧版本）
+            if result:
+                self.delete(f"{key}.manifest")
+            return result
         return self._put_file_chunked(key, file_path, file_size)
 
     def _put_file_chunked(self, key, file_path, file_size):

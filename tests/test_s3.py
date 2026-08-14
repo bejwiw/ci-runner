@@ -80,3 +80,31 @@ def test_constants():
     assert LARGE_FILE_THRESHOLD == 50 * 1024 * 1024
     assert CHUNK_SIZE == 10 * 1024 * 1024
     assert CONC_SMALL < CONC_MEDIUM < CONC_LARGE
+
+
+def test_put_file_deletes_old_manifest(monkeypatch, tmp_path):
+    """put_file 上传小文件后删除旧 manifest（防止 get_to_file 读旧版本）"""
+    from core.s3 import S3Pool
+    pool = S3Pool.__new__(S3Pool)
+    pool._initialized = True
+    pool._hash_ring = type('R', (), {'get_account': lambda s, k: 0})()
+    pool._counters = {0: {'status': 'active', 'a_count': 0, 'used_bytes': 0, 'b_count': 0, 'fail_count': 0}}
+    pool._clients = {}
+    pool._bootstrap = {'access_key': 'a', 'secret_key': 's', 'bucket': 'b'}
+    pool._accounts = []
+    pool._lock = __import__('threading').RLock()
+    pool._owner = 'test'
+    deleted = []
+    class FakeClient:
+        def put(self, key, data, prefix='ghbox'):
+            return True
+        def get(self, key, prefix='ghbox'):
+            return None
+    pool._get_client = lambda idx: FakeClient()
+    pool.delete = lambda key: deleted.append(key)
+    # 创建小文件
+    f = tmp_path / 'small.txt'
+    f.write_text('hello')
+    pool.put_file('inst-files/test/files.tar.gz', str(f))
+    # 应该删除 manifest
+    assert 'inst-files/test/files.tar.gz.manifest' in deleted
