@@ -459,6 +459,7 @@ class S3Pool:
 
         小文件用 put 直接上传后必须删除旧的分片 manifest，
         否则 get_to_file 会读到旧 manifest 下载旧版本。
+        manifest 可能因 put fallback 在任意账号上，需遍历删除。
         """
         if not self._initialized:
             return False
@@ -467,11 +468,29 @@ class S3Pool:
             with open(file_path, "rb") as f:
                 data = f.read()
             result = self.put(key, data)
-            # 删除旧的分片 manifest（防止 get_to_file 读旧版本）
             if result:
-                self.delete(f"{key}.manifest")
+                self._delete_manifest_everywhere(f"{key}.manifest")
             return result
         return self._put_file_chunked(key, file_path, file_size)
+
+    def _delete_manifest_everywhere(self, manifest_key):
+        """遍历附近账号删除 manifest（put fallback 可能写到任意账号）"""
+        account_idx = self._hash_ring.get_account(manifest_key)
+        if account_idx is not None:
+            try:
+                self._get_client(account_idx).delete(manifest_key)
+            except Exception as e:
+                logger.debug(f"[s3] delete manifest account {account_idx}: {e}")
+        nearby = self._hash_ring.get_nearby_accounts(manifest_key, MAX_SCAN)
+        for alt_idx in nearby:
+            if alt_idx == account_idx:
+                continue
+            if self._counters.get(alt_idx, {}).get("status") == "unavailable":
+                continue
+            try:
+                self._get_client(alt_idx).delete(manifest_key)
+            except Exception as e:
+                logger.debug(f"[s3] delete manifest account {alt_idx}: {e}")
 
     def _put_file_chunked(self, key, file_path, file_size):
         """分片并发上传大文件"""
