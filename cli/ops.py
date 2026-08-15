@@ -14,6 +14,34 @@ from cli import api, config
 console = Console()
 
 
+def _get(path, msg="加载中"):
+    """带加载动画的 GET"""
+    with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
+        return _get(path)
+
+def _post(path, data=None, msg="请求中"):
+    """带加载动画的 POST"""
+    with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
+        return _post(path, data=data)
+
+def _delete(path, msg="处理中"):
+    """带加载动画的 DELETE"""
+    with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
+        return _delete(path)
+
+def _get_inst(hostname, path, msg="加载中"):
+    with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
+        return _get_inst(hostname, path)
+
+def _post_inst(hostname, path, data=None, msg="请求中"):
+    with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
+        return _post_inst(hostname, path, data=data)
+
+def _get_url(url, msg="加载中"):
+    with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
+        return _get_url(url)
+
+
 # ==================== 工具函数 ====================
 
 def _input(prompt):
@@ -39,7 +67,7 @@ def _info(msg):
 
 def pick_instance(running_only=True):
     """选择实例，返回 instance dict 或 None"""
-    d = api.get("/api/instances")
+    d = _get("/api/instances")
     ok, data = api.check(d)
     if not ok:
         _err(f"无法获取实例列表: {data}")
@@ -68,7 +96,7 @@ def pick_instance(running_only=True):
 # ==================== 实例操作 ====================
 
 def list_instances():
-    d = api.get("/api/instances")
+    d = _get("/api/instances")
     ok, data = api.check(d)
     if not ok:
         _err(f"无法连接 Manager: {data}")
@@ -93,7 +121,7 @@ def list_instances():
 
 
 def create_instance():
-    d = api.get("/api/accounts")
+    d = _get("/api/accounts")
     ok, data = api.check(d)
     if not ok:
         _err(f"无法获取账号列表: {data}")
@@ -116,7 +144,7 @@ def create_instance():
         except (ValueError, IndexError):
             _warn("无效选择，使用自动选择")
     console.print("\n  [cyan]正在创建新实例（隧道+MCP+启动）...[/]")
-    d = api.post("/api/instances", payload)
+    d = _post("/api/instances", payload)
     ok, data = api.check(d)
     if ok:
         inst = data.get("instance", {})
@@ -127,7 +155,7 @@ def create_instance():
         if host:
             console.print("  [dim]等待实例就绪...[/]")
             for attempt in range(60):
-                r = api.get_url(f"https://{host}/api/health", timeout=10)
+                r = _get_url(f"https://{host}/api/health", timeout=10)
                 if r.get("ok"):
                     _ok(f"实例已就绪（{attempt*5}秒）")
                     break
@@ -145,7 +173,7 @@ def restart_instance():
         return
     inst_id = inst["id"]
     console.print(f"\n  [yellow]正在重启 {inst_id}（备份→退出→新实例启动）...[/]")
-    d = api.post(f"/api/instances/{inst_id}/restart")
+    d = _post(f"/api/instances/{inst_id}/restart")
     ok, data = api.check(d)
     if ok:
         _ok(f"{inst_id} 正在重启，状态: {data.get('status', 'restarting')}")
@@ -159,7 +187,7 @@ def close_instance():
     if not inst:
         return
     inst_id = inst["id"]
-    d = api.delete(f"/api/instances/{inst_id}")
+    d = _delete(f"/api/instances/{inst_id}")
     ok, data = api.check(d)
     if ok:
         _ok(data.get("msg", "已关闭"))
@@ -170,7 +198,7 @@ def close_instance():
 # ==================== 账号操作 ====================
 
 def list_accounts():
-    d = api.get("/api/accounts")
+    d = _get("/api/accounts")
     ok, data = api.check(d)
     if not ok:
         _err(f"无法获取账号列表: {data}")
@@ -196,7 +224,7 @@ def add_account():
     token = _input("  GitHub Token（留空取消）: ")
     if token is None:
         return
-    d = api.post("/api/accounts", {"name": name, "token": token})
+    d = _post("/api/accounts", {"name": name, "token": token})
     ok, data = api.check(d)
     if ok:
         _ok(data.get("msg", "成功"))
@@ -205,7 +233,7 @@ def add_account():
 
 
 def banned_accounts():
-    d = api.get("/api/accounts/banned")
+    d = _get("/api/accounts/banned")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -226,7 +254,7 @@ def banned_accounts():
 # ==================== 任务/日志/总览 ====================
 
 def list_tasks():
-    d = api.get("/api/tasks")
+    d = _get("/api/tasks")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -258,7 +286,7 @@ def view_logs():
         limit = max(10, min(int(limit_str) if limit_str else 300, 2000))
     except ValueError:
         limit = 300
-    d = api.get(f"/api/logs?limit={limit}")
+    d = _get(f"/api/logs?limit={limit}")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -274,7 +302,7 @@ def view_logs():
 
 
 def overview():
-    d = api.get("/api/overview")
+    d = _get("/api/overview")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -304,7 +332,7 @@ def logs_follow():
     seen = 0
     try:
         while True:
-            d = api.get(f"/api/instances/{inst['id']}/logs?limit=500")
+            d = _get(f"/api/instances/{inst['id']}/logs?limit=500")
             ok, data = api.check(d)
             if ok:
                 logs = data.get("logs", [])
@@ -321,7 +349,7 @@ def logs_follow():
 # ==================== S3 操作 ====================
 
 def s3_status():
-    d = api.get("/api/s3/status")
+    d = _get("/api/s3/status")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -345,7 +373,7 @@ def s3_status():
 
 
 def s3_health():
-    d = api.get("/api/s3/health")
+    d = _get("/api/s3/health")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -354,7 +382,7 @@ def s3_health():
 
 
 def s3_accounts():
-    d = api.get("/api/s3/accounts")
+    d = _get("/api/s3/accounts")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -381,7 +409,7 @@ def s3_accounts():
 
 
 def s3_workers():
-    d = api.get("/api/s3/workers")
+    d = _get("/api/s3/workers")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -397,7 +425,7 @@ def s3_workers():
 
 
 def backup_history(inst_id):
-    d = api.get(f"/api/instances/{inst_id}/backup-history")
+    d = _get(f"/api/instances/{inst_id}/backup-history")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -415,7 +443,7 @@ def backup_history(inst_id):
 
 
 def restore_history(inst_id):
-    d = api.get(f"/api/instances/{inst_id}/restore-history")
+    d = _get(f"/api/instances/{inst_id}/restore-history")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -428,7 +456,7 @@ def restore_history(inst_id):
 
 
 def timeline(inst_id):
-    d = api.get(f"/api/instances/{inst_id}/timeline")
+    d = _get(f"/api/instances/{inst_id}/timeline")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -441,7 +469,7 @@ def timeline(inst_id):
 
 
 def worker_stats(inst_id):
-    d = api.get(f"/api/instances/{inst_id}/stats")
+    d = _get(f"/api/instances/{inst_id}/stats")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -460,7 +488,7 @@ def list_processes():
     inst = pick_instance()
     if not inst:
         return
-    d = api.get_inst(inst["hostname"], "/api/processes")
+    d = _get_inst(inst["hostname"], "/api/processes")
     ok, data = api.check(d)
     if not ok:
         _err(data.get("error", data) if isinstance(data, dict) else str(data))
@@ -489,7 +517,7 @@ def snapshot_processes():
     inst = pick_instance()
     if not inst:
         return
-    d = api.post_inst(inst["hostname"], "/api/processes/snapshot", {"token": config.TOKEN})
+    d = _post_inst(inst["hostname"], "/api/processes/snapshot", {"token": config.TOKEN})
     ok, data = api.check(d)
     if ok:
         _ok(f"快照完成，持久化 {data.get('saved', 0)} 个进程")
@@ -504,7 +532,7 @@ def start_process():
     name = _input("  进程名称（留空取消）: ")
     if name is None:
         return
-    d = api.post_inst(inst["hostname"], f"/api/processes/{name}/start", {"token": config.TOKEN})
+    d = _post_inst(inst["hostname"], f"/api/processes/{name}/start", {"token": config.TOKEN})
     ok, data = api.check(d)
     if ok:
         _ok(data.get("msg", "已启动"))
@@ -519,7 +547,7 @@ def stop_process():
     name = _input("  进程名称（留空取消）: ")
     if name is None:
         return
-    d = api.post_inst(inst["hostname"], f"/api/processes/{name}/stop", {"token": config.TOKEN})
+    d = _post_inst(inst["hostname"], f"/api/processes/{name}/stop", {"token": config.TOKEN})
     ok, data = api.check(d)
     if ok:
         _ok(data.get("msg", "已停止"))
@@ -534,7 +562,7 @@ def restart_process():
     name = _input("  进程名称（留空取消）: ")
     if name is None:
         return
-    d = api.post_inst(inst["hostname"], f"/api/processes/{name}/restart", {"token": config.TOKEN})
+    d = _post_inst(inst["hostname"], f"/api/processes/{name}/restart", {"token": config.TOKEN})
     ok, data = api.check(d)
     if ok:
         _ok(data.get("msg", "已重启"))
@@ -554,7 +582,7 @@ def process_log():
         limit = max(10, min(int(limit_str), 2000))
     except ValueError:
         limit = 200
-    d = api.get_inst(inst["hostname"], f"/api/processes/{name}/log?limit={limit}&token={config.TOKEN}")
+    d = _get_inst(inst["hostname"], f"/api/processes/{name}/log?limit={limit}&token={config.TOKEN}")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -574,7 +602,7 @@ def backup_now():
     if not inst:
         return
     console.print("  [cyan]正在备份（数据库+文件+进程快照+S3状态）...[/]")
-    d = api.post_inst(inst["hostname"], "/api/backup/now", {"token": config.TOKEN})
+    d = _post_inst(inst["hostname"], "/api/backup/now", {"token": config.TOKEN})
     ok, data = api.check(d)
     if ok:
         _ok(f"备份完成: db={data.get('db_size', 0)}B files={data.get('files_size', 0)}B 耗时={data.get('elapsed', 0)}s")
@@ -594,7 +622,7 @@ def exec_cmd():
         timeout = max(1, min(int(timeout_str), 600))
     except ValueError:
         timeout = 30
-    d = api.post(f"/api/instances/{inst['id']}/exec", {"cmd": cmd, "timeout": timeout})
+    d = _post(f"/api/instances/{inst['id']}/exec", {"cmd": cmd, "timeout": timeout})
     r = d.get("result") or d
     if r.get("ok"):
         out = r.get("stdout", "")
@@ -623,7 +651,7 @@ def exec_batch():
         return
     for cmd in cmds:
         console.print(f"\n  [cyan]>> {cmd}[/]")
-        d = api.post(f"/api/instances/{inst['id']}/exec", {"cmd": cmd, "timeout": 30})
+        d = _post(f"/api/instances/{inst['id']}/exec", {"cmd": cmd, "timeout": 30})
         r = d.get("result") or d
         if r.get("ok"):
             out = r.get("stdout", "")
@@ -638,7 +666,7 @@ def resource_monitor():
     inst = pick_instance()
     if not inst:
         return
-    d = api.get_inst(inst["hostname"], "/api/resource")
+    d = _get_inst(inst["hostname"], "/api/resource")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -665,7 +693,7 @@ def attack_start():
     except ValueError:
         _err("无效数字")
         return
-    d = api.post_inst(inst["hostname"], "/api/attack/start",
+    d = _post_inst(inst["hostname"], "/api/attack/start",
                       {"target": target, "type": atype, "port": port,
                        "duration": dur, "token": config.TOKEN})
     ok, data = api.check(d)
@@ -679,7 +707,7 @@ def attack_stop():
     inst = pick_instance()
     if not inst:
         return
-    d = api.post_inst(inst["hostname"], "/api/attack/stop", {"token": config.TOKEN})
+    d = _post_inst(inst["hostname"], "/api/attack/stop", {"token": config.TOKEN})
     ok, data = api.check(d)
     if ok:
         _ok(data.get("msg", "已停止"))
@@ -691,7 +719,7 @@ def attack_status():
     inst = pick_instance()
     if not inst:
         return
-    d = api.get_inst(inst["hostname"], "/api/attack/status")
+    d = _get_inst(inst["hostname"], "/api/attack/status")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -708,7 +736,7 @@ def proxy_logs():
     inst = pick_instance()
     if not inst:
         return
-    d = api.get(f"/api/instances/{inst['id']}/logs?limit=50")
+    d = _get(f"/api/instances/{inst['id']}/logs?limit=50")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -724,7 +752,7 @@ def proxy_processes():
     inst = pick_instance()
     if not inst:
         return
-    d = api.get(f"/api/instances/{inst['id']}/processes")
+    d = _get(f"/api/instances/{inst['id']}/processes")
     ok, data = api.check(d)
     if not ok:
         _err(data)
@@ -742,7 +770,7 @@ def proxy_resource():
     inst = pick_instance()
     if not inst:
         return
-    d = api.get(f"/api/instances/{inst['id']}/resource")
+    d = _get(f"/api/instances/{inst['id']}/resource")
     ok, data = api.check(d)
     if not ok:
         _err(data)
