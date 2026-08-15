@@ -134,9 +134,9 @@ def attack_menu():
     while True:
         console.print()
         console.print(Rule("攻击功能", style="cyan"))
-        console.print("  [1] 发起攻击")
-        console.print("  [2] 停止攻击")
-        console.print("  [3] 攻击状态")
+        console.print("  [1] 发起攻击（支持多实例）")
+        console.print("  [2] 停止攻击（支持多实例）")
+        console.print("  [3] 攻击状态（全部实例）")
         console.print("  [0] 返回")
         choice = ops._input("\n  请选择: ")
         if choice == "1":
