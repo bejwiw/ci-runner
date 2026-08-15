@@ -38,6 +38,8 @@ def _backup_loop():
     """周期备份（数据库 + 文件 + 进程快照 + 记录stats）"""
     while True:
         time.sleep(config.BACKUP_INTERVAL)
+        if state.shutting_down:
+            return
         if state.leader and not state.leader.is_leader:
             continue
         try:
@@ -67,6 +69,9 @@ def _report_running():
     """周期向 manager 上报（每60秒，携带S3摘要+进程数+磁盘）"""
     mgr = config.MANAGER_HOST or "ghvps2.kekeke.cc.cd"
     while True:
+        if state.shutting_down:
+            logger.info("[report] 关闭中，停止上报")
+            return
         try:
             # 收集S3摘要 + pending
             s3_summary = {"active": 0, "degraded": 0, "unavailable": 0}
@@ -126,6 +131,8 @@ def _worker_pre_wake():
     """续命：到期前备份 + 预触发下一个 worker"""
     done = False
     while True:
+        if state.shutting_down:
+            return
         elapsed = core_status.elapsed()
         if elapsed >= config.PRE_WAKE_SECONDS and not done:
             done = True
@@ -178,6 +185,8 @@ def _auto_update_loop():
     if not sha:
         return
     while True:
+        if state.shutting_down:
+            return
         time.sleep(300)
         try:
             url = f"{ghapi.API_BASE}/repos/{config.MAIN_REPO}/commits/main"
@@ -208,6 +217,8 @@ def _auto_update_loop():
 def _disk_monitor_loop():
     """磁盘监控：超阈值清理临时文件"""
     while True:
+        if state.shutting_down:
+            return
         time.sleep(config.DISK_CHECK_INTERVAL)
         try:
             stats = log.get_resource_stats()

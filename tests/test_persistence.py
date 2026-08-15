@@ -106,3 +106,12 @@ def test_load_stats_no_file(stats_file):
     assert stats["pending_b"] == 0
     assert stats["storage_mb"] == 0
     assert stats["backup_history"] == []
+
+
+def test_shutting_down_flag():
+    """worker 关闭标志初始为 False，可设置"""
+    from worker import state
+    assert state.shutting_down is False
+    state.shutting_down = True
+    assert state.shutting_down is True
+    state.shutting_down = False  # 重置

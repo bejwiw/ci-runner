@@ -240,6 +240,7 @@ def graceful_shutdown():
 
     def _do_shutdown():
         import time as _t
+        state.shutting_down = True  # 立即停止上报/备份/续命循环
         _t.sleep(1)  # 确保响应已发送
         logger.warning("[shutdown] 收到优雅关闭请求，开始备份")
         try:

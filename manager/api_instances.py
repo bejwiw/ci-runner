@@ -247,8 +247,13 @@ def instance_report(inst_id):
             logger.info(f"[report] 实例 {inst_id} 已自愈恢复")
         else:
             return jsonify(ok=False, error=f"实例 {inst_id} 不存在且无配置"), 404
-    store.update_instance(inst_id, status="running",
-                          url=d.get("url", inst.get("url", "")))
+    # 防御：重启中不改状态（worker 收到 /api/shutdown 后会设 shutting_down 停止上报，
+    # 但可能有在途请求，双保险）
+    if inst.get("status") == "restarting":
+        store.update_instance(inst_id, url=d.get("url", inst.get("url", "")))
+    else:
+        store.update_instance(inst_id, status="running",
+                              url=d.get("url", inst.get("url", "")))
     monitor._fail_counts.pop(inst_id, None)
     return jsonify(ok=True)
 
