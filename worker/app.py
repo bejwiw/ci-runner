@@ -230,6 +230,46 @@ def term_screen():
     return jsonify(ok=True, screen=terminal.get_screen(request.args.get("session", "")))
 
 
+# ==================== 优雅关闭 ====================
+@app.route("/api/shutdown", methods=["POST"])
+def graceful_shutdown():
+    """优雅关闭：备份→上报→退出（收到 manager 的重启通知）"""
+    data = request.get_json(silent=True) or {}
+    if not _check(data):
+        return jsonify(ok=False, error="未授权"), 401
+
+    def _do_shutdown():
+        import time as _t
+        _t.sleep(1)  # 确保响应已发送
+        logger.warning("[shutdown] 收到优雅关闭请求，开始备份")
+        try:
+            db_size, _ = persistence.backup_database(state.inst_cfg)
+            res = persistence.backup_files(state.inst_cfg)
+            if state.proc_mgr:
+                state.proc_mgr.final_snapshot()
+            _size = int(db_size or 0) + int((res[0] if res else 0))
+            persistence.record_backup("pre-shutdown", _size,
+                f"shutdown: db={db_size}B files={res[0] if res else 0}MB", 0, 0)
+            logger.info("[shutdown] 备份完成")
+        except Exception as e:
+            logger.error(f"[shutdown] 备份失败: {e}")
+        # 上报 manager
+        try:
+            from core.utils import http_request
+            url = f"https://{config.MANAGER_HOST}/api/instances/{config.INSTANCE_ID}/shutdown-complete"
+            http_request(url, method="POST",
+                data=json.dumps({"token": config.EXEC_TOKEN}).encode(),
+                headers={"Content-Type": "application/json"},
+                timeout=10, retries=2)
+        except Exception as e:
+            logger.warning(f"[shutdown] 上报失败: {e}")
+        logger.warning("[shutdown] 退出")
+        os._exit(0)
+
+    threading.Thread(target=_do_shutdown, daemon=True).start()
+    return jsonify(ok=True, msg="正在备份并关闭")
+
+
 # ==================== 攻击 API ====================
 @app.route("/api/attack/start", methods=["POST"])
 def attack_start():

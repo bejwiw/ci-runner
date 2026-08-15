@@ -30,29 +30,30 @@ def _api(method, url, data=None, timeout=60, token=None):
 def get(path, timeout=60):
     return _api("GET", config.mgr(path), timeout=timeout)
 
-
 def post(path, data=None, timeout=90):
     return _api("POST", config.mgr(path), data=data, timeout=timeout)
-
 
 def delete(path, timeout=60):
     return _api("DELETE", config.mgr(path), timeout=timeout)
 
-
 def get_url(url, timeout=60):
     return _api("GET", url, timeout=timeout)
 
-
 def post_url(url, data=None, timeout=60):
     return _api("POST", url, data=data, timeout=timeout)
-
 
 def post_inst(hostname, path, data=None, timeout=60):
     """直接请求实例 API"""
     url = config.inst_url(hostname) + path
     return _api("POST", url, data=data, timeout=timeout)
 
-
 def get_inst(hostname, path, timeout=60):
     url = config.inst_url(hostname) + path
     return _api("GET", url, timeout=timeout)
+
+
+def check(d):
+    """检查 API 返回。成功返回 (True, data)，失败返回 (False, error)"""
+    if d.get("ok"):
+        return True, d
+    return False, d.get("error", "未知错误")

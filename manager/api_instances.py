@@ -345,3 +345,101 @@ def instance_resource(inst_id):
             return jsonify(json.loads(r.read().decode()))
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 502
+
+
+# ==================== 优雅重启 ====================
+@bp.route("/api/instances/<inst_id>/restart", methods=["POST"])
+@require_auth
+def restart_instance(inst_id):
+    """优雅重启实例：通知实例备份→退出→触发新workflow→监控"""
+    if not _is_leader():
+        return jsonify(ok=False, error="备份节点"), 503
+    inst = store.get_instance(inst_id)
+    if not inst:
+        return jsonify(ok=False, error=f"实例 {inst_id} 不存在"), 404
+    if inst.get("status") == "restarting":
+        return jsonify(ok=False, error="正在重启中"), 409
+    store.update_instance(inst_id, status="restarting")
+    threading.Thread(target=_restart_worker, args=(inst_id, inst), daemon=True).start()
+    return jsonify(ok=True, msg=f"实例 {inst_id} 正在重启", status="restarting")
+
+
+@bp.route("/api/instances/<inst_id>/shutdown-complete", methods=["POST"])
+def shutdown_complete(inst_id):
+    """实例备份完成通知"""
+    if not _authed():
+        return jsonify(ok=False, error="未授权"), 401
+    state.shutdown_notifications[inst_id] = time.time()
+    logger.info(f"[restart] {inst_id} 备份完成通知")
+    return jsonify(ok=True)
+
+
+def _restart_worker(inst_id, inst):
+    """重启流程：通知实例关闭→等待→触发新workflow→监控health"""
+    host = inst.get("hostname", "")
+    # 1. 通知实例优雅关闭
+    shutdown_ok = False
+    if host:
+        try:
+            from core.utils import http_request
+            url = f"https://{host}/api/shutdown"
+            status, _ = http_request(url, method="POST",
+                data=json.dumps({"token": config.EXEC_TOKEN}).encode(),
+                headers={"Content-Type": "application/json"},
+                timeout=30, retries=1)
+            if status == 200:
+                shutdown_ok = True
+                logger.info(f"[restart] {inst_id} 优雅关闭已通知")
+            else:
+                logger.warning(f"[restart] {inst_id} shutdown 返回 {status}")
+        except Exception as e:
+            logger.warning(f"[restart] {inst_id} 通知失败: {e}")
+
+    # 2. 等待实例退出（收到通知 或 60秒超时 或 实例不可达）
+    if shutdown_ok:
+        for _ in range(60):
+            if inst_id in state.shutdown_notifications:
+                logger.info(f"[restart] {inst_id} 备份完成，准备触发新 worker")
+                break
+            # 检查实例是否已退出
+            try:
+                req = urllib.request.Request(f"https://{host}/api/health",
+                    headers={"User-Agent": "Mozilla/5.0"})
+                urllib.request.urlopen(req, timeout=5)
+            except Exception:
+                # 实例已不可达
+                break
+            time.sleep(1)
+        state.shutdown_notifications.pop(inst_id, None)
+
+    # 3. 触发新 workflow
+    account = next((a for a in accounts.load_accounts()
+                    if a["name"] == inst.get("account")), None)
+    if not account:
+        logger.error(f"[restart] {inst_id} 找不到账号")
+        store.update_instance(inst_id, status="restart_failed")
+        return
+    repo = account.get("repo") or config.REPO
+    url = f"{ghapi.API_BASE}/repos/{repo}/actions/workflows/{config.WORKER_WORKFLOW}/dispatches"
+    ghapi.gh_request("POST", url, token=account.get("token"),
+                     data={"ref": "main", "inputs": {"INSTANCE_ID": inst_id}})
+    logger.info(f"[restart] {inst_id} 已触发新 worker")
+
+    # 4. 监控新实例启动（每10秒，最多5分钟）
+    import time as _t
+    _t.sleep(30)  # 等新实例启动
+    for attempt in range(30):
+        try:
+            req = urllib.request.Request(f"https://{host}/api/health",
+                headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                if r.status == 200:
+                    store.update_instance(inst_id, status="running")
+                    logger.info(f"[restart] {inst_id} 重启成功")
+                    return
+        except Exception:
+            pass
+        _t.sleep(10)
+    # 超时
+    store.update_instance(inst_id, status="restart_failed")
+    logger.error(f"[restart] {inst_id} 重启超时（5分钟未恢复），需手动处理")

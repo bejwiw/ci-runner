@@ -1,55 +1,103 @@
 # -*- coding: utf-8 -*-
 """
-CLI 主菜单 + 子菜单 UI
+CLI 主菜单 + 子菜单 UI（rich 美化版）
 """
-from cli import config
-from cli.ops import _input
+from rich.console import Console
+from rich.panel import Panel
+from rich.rule import Rule
+from cli import config, ops
+
+console = Console()
 
 
 def main_menu():
-    print("\n" + "=" * 54)
-    print("  ghbox GitHub Actions 云端实例管理")
-    print(f"  Manager: {config.MANAGER}")
-    print("=" * 54)
-    print("  [1] 查看所有实例")
-    print("  [2] 新建实例")
-    print("  [3] 连接实例终端")
-    print("  [4] 关闭实例")
-    print("  [5] 查看账号")
-    print("  [6] 添加账号")
-    print("  [7] 任务队列")
-    print("  [8] 查看服务器日志")
-    print("  [9] S3 存储（状态/健康/账号详情）")
-    print("  [a] 实例管理（进程/备份/执行命令）")
-    print("  [b] 攻击功能")
-    print("  [o] 总览")
-    print("  [0] 退出")
-    return _input("\n  请选择: ")
+    console.print(Panel(
+        f"Manager: {config.MANAGER}",
+        title="[bold cyan]ghbox GitHub Actions 云端实例管理[/]",
+        border_style="cyan"))
+    console.print()
+    console.print(Rule("实例", style="dim"))
+    console.print("  [1] 查看实例列表")
+    console.print("  [2] 新建实例")
+    console.print("  [3] 连接实例终端")
+    console.print("  [4] [yellow]重启实例[/]")
+    console.print("  [5] 关闭实例")
+    console.print()
+    console.print(Rule("管理", style="dim"))
+    console.print("  [6] 账号管理")
+    console.print("  [7] 任务队列")
+    console.print("  [8] 服务器日志")
+    console.print("  [9] S3 存储管理")
+    console.print()
+    console.print(Rule("工具", style="dim"))
+    console.print("  [a] 实例管理（进程/备份/命令/资源）")
+    console.print("  [b] 攻击功能")
+    console.print("  [o] 总览")
+    console.print("  [0] 退出")
+    return ops._input("\n  请选择: ")
+
+
+def account_menu():
+    while True:
+        console.print()
+        console.print(Rule("账号管理", style="cyan"))
+        console.print("  [1] 查看账号列表")
+        console.print("  [2] 添加账号")
+        console.print("  [3] 被封账号")
+        console.print("  [0] 返回")
+        choice = ops._input("\n  请选择: ")
+        if choice == "1":
+            ops.list_accounts()
+        elif choice == "2":
+            ops.add_account()
+        elif choice == "3":
+            ops.banned_accounts()
+        elif choice == "0" or choice is None:
+            break
+
+
+def s3_menu():
+    while True:
+        console.print()
+        console.print(Rule("S3 存储管理", style="cyan"))
+        console.print("  [1] 全局状态")
+        console.print("  [2] 健康摘要")
+        console.print("  [3] 账号详情（非active）")
+        console.print("  [4] Worker 详情")
+        console.print("  [0] 返回")
+        choice = ops._input("\n  请选择: ")
+        if choice == "1":
+            ops.s3_status()
+        elif choice == "2":
+            ops.s3_health()
+        elif choice == "3":
+            ops.s3_accounts()
+        elif choice == "4":
+            ops.s3_workers()
+        elif choice == "0" or choice is None:
+            break
 
 
 def instance_menu():
-    """实例管理子菜单"""
-    from cli import ops
     while True:
-        print("\n" + "-" * 40)
-        print("  实例管理（进程/备份/执行命令）")
-        print("-" * 40)
-        print("  [1] 查看进程列表")
-        print("  [2] 触发进程快照")
-        print("  [3] 启动进程")
-        print("  [4] 停止进程")
-        print("  [5] 重启进程")
-        print("  [6] 查看进程日志")
-        print("  [7] 立即备份")
-        print("  [8] 执行命令")
-        print("  [9] 资源监控")
-        print("  [a] Worker日志（代理）")
-        print("  [b] Worker进程（代理）")
-        print("  [c] Worker资源（代理）")
-        print("  [d] 日志实时跟随")
-        print("  [e] 批量执行命令")
-        print("  [0] 返回主菜单")
-        choice = _input("\n  请选择: ")
+        console.print()
+        console.print(Rule("实例管理", style="cyan"))
+        console.print("  [1] 查看进程列表")
+        console.print("  [2] 触发进程快照")
+        console.print("  [3] 启动进程")
+        console.print("  [4] 停止进程")
+        console.print("  [5] 重启进程")
+        console.print("  [6] 查看进程日志")
+        console.print("  [7] 立即备份")
+        console.print("  [8] 执行命令")
+        console.print("  [9] 资源监控")
+        console.print("  [a] Worker日志（代理）")
+        console.print("  [b] Worker进程（代理）")
+        console.print("  [c] Worker资源（代理）")
+        console.print("  [d] 日志实时跟随")
+        console.print("  [e] 批量执行命令")
+        console.print("  [0] 返回")
+        choice = ops._input("\n  请选择: ")
         if choice == "1":
             ops.list_processes()
         elif choice == "2":
@@ -80,22 +128,17 @@ def instance_menu():
             ops.exec_batch()
         elif choice == "0" or choice is None:
             break
-        else:
-            print("  无效选择")
 
 
 def attack_menu():
-    """攻击功能子菜单"""
-    from cli import ops
     while True:
-        print("\n" + "-" * 40)
-        print("  攻击功能")
-        print("-" * 40)
-        print("  [1] 发起攻击")
-        print("  [2] 停止攻击")
-        print("  [3] 攻击状态")
-        print("  [0] 返回主菜单")
-        choice = _input("\n  请选择: ")
+        console.print()
+        console.print(Rule("攻击功能", style="cyan"))
+        console.print("  [1] 发起攻击")
+        console.print("  [2] 停止攻击")
+        console.print("  [3] 攻击状态")
+        console.print("  [0] 返回")
+        choice = ops._input("\n  请选择: ")
         if choice == "1":
             ops.attack_start()
         elif choice == "2":
@@ -104,13 +147,10 @@ def attack_menu():
             ops.attack_status()
         elif choice == "0" or choice is None:
             break
-        else:
-            print("  无效选择")
 
 
 def run_menu():
     """主菜单循环"""
-    from cli import ops
     from cli import terminal
     while True:
         try:
@@ -122,14 +162,14 @@ def run_menu():
             elif choice == "3":
                 inst = ops.pick_instance()
                 if inst:
-                    print(f"  连接 {inst['id']} ... (Ctrl+4 退出)")
+                    console.print(f"  [cyan]连接 {inst['id']} ... (Ctrl+4 退出)[/]")
                     terminal.connect_terminal(inst.get("hostname", ""))
             elif choice == "4":
-                ops.close_instance()
+                ops.restart_instance()
             elif choice == "5":
-                ops.list_accounts()
+                ops.close_instance()
             elif choice == "6":
-                ops.add_account()
+                account_menu()
             elif choice == "7":
                 ops.list_tasks()
             elif choice == "8":
@@ -143,35 +183,11 @@ def run_menu():
             elif choice in ("o", "O"):
                 ops.overview()
             elif choice == "0" or choice is None:
-                print("  再见！")
+                console.print("  [dim]再见！[/]")
                 break
             else:
-                print("  无效选择")
+                ops._err("无效选择")
         except KeyboardInterrupt:
-            print("\n  返回菜单")
+            console.print("\n  [dim]返回菜单[/]")
         except Exception as e:
-            print(f"  错误: {e}")
-
-
-def s3_menu():
-    """S3 存储子菜单"""
-    from cli import ops
-    while True:
-        print("\n" + "-" * 40)
-        print("  S3 存储管理")
-        print("-" * 40)
-        print("  [1] 全局状态")
-        print("  [2] 健康摘要")
-        print("  [3] 账号详情（非active）")
-        print("  [0] 返回主菜单")
-        choice = _input("\n  请选择: ")
-        if choice == "1":
-            ops.s3_status()
-        elif choice == "2":
-            ops.s3_health()
-        elif choice == "3":
-            ops.s3_accounts()
-        elif choice == "0" or choice is None:
-            break
-        else:
-            print("  无效选择")
+            ops._err(str(e))
