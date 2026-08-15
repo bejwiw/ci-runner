@@ -17,29 +17,29 @@ console = Console()
 def _get(path, msg="加载中"):
     """带加载动画的 GET"""
     with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
-        return _get(path)
+        return api.get(path)
 
 def _post(path, data=None, msg="请求中"):
     """带加载动画的 POST"""
     with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
-        return _post(path, data=data)
+        return api.post(path, data=data)
 
 def _delete(path, msg="处理中"):
     """带加载动画的 DELETE"""
     with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
-        return _delete(path)
+        return api.delete(path)
 
 def _get_inst(hostname, path, msg="加载中"):
     with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
-        return _get_inst(hostname, path)
+        return api.get_inst(hostname, path)
 
 def _post_inst(hostname, path, data=None, msg="请求中"):
     with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
-        return _post_inst(hostname, path, data=data)
+        return api.post_inst(hostname, path, data=data)
 
 def _get_url(url, msg="加载中"):
     with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
-        return _get_url(url)
+        return api.get_url(url)
 
 
 # ==================== 工具函数 ====================
