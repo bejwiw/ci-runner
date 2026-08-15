@@ -313,7 +313,7 @@ def _pty_reader(session_key, sid):
         return
     try:
         while sess.attached:
-            r, _, _ = select.select([sess.fd], [], [], 1.0)
+            r, _, _ = select.select([sess.fd], [], [], 0.05)
             if r:
                 data = sess.read_output()
                 if data is None:

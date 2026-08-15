@@ -97,22 +97,24 @@ def connect_terminal(host):
     def send_loop():
         try:
             while True:
-                ch = os.read(0, 1)
+                ch = os.read(0, 4096)
                 if not ch:
                     break
-                if ch == KEY_CTRL_4:
+                if KEY_CTRL_4 in ch:
                     state["force_exit"] = True
                     try:
                         sio.disconnect()
                     except Exception as e:
                         sys.stderr.write(f"\r\n[terminal] {e}\r\n")
                     break
-                if ch == KEY_CTRL_O:
+                if KEY_CTRL_O in ch:
                     screen = _get_clean_screen(url, session)
                     if screen:
                         sys.stdout.write("\r\n" + screen + "\r\n")
                         sys.stdout.flush()
-                    continue
+                    ch = ch.replace(KEY_CTRL_O, b"")
+                    if not ch:
+                        continue
                 try:
                     sio.emit("input", ch)
                 except Exception as e:
@@ -126,19 +128,8 @@ def connect_terminal(host):
                 sys.stderr.write(f"\r\n[terminal] {e}\r\n")
 
     def _connect():
-        try:
-            req = urllib.request.Request(
-                url.rstrip("/") + "/api/health",
-                headers={"User-Agent": "Mozilla/5.0 (ghbox-cli)"})
-            with urllib.request.urlopen(req, timeout=10) as r:
-                if r.status != 200:
-                    raise ConnectionError(f"实例返回 {r.status}")
-        except urllib.error.HTTPError as e:
-            raise ConnectionError(f"实例返回 {e.code}")
-        except urllib.error.URLError as e:
-            raise ConnectionError(f"无法连接实例: {e.reason}")
         sio.connect(url, auth={"token": config.TOKEN, "session": session},
-                    transports=["websocket"], wait_timeout=25)
+                    transports=["websocket"], wait_timeout=15)
 
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)

@@ -655,7 +655,7 @@ def exec_cmd():
         timeout = max(1, min(int(timeout_str), 600))
     except ValueError:
         timeout = 30
-    d = _post(f"/api/instances/{inst['id']}/exec", {"cmd": cmd, "timeout": timeout})
+    d = _post_inst(inst["hostname"], "/api/exec", {"cmd": cmd, "token": config.TOKEN, "timeout": timeout}, msg="执行命令")
     r = d.get("result") or d
     if r.get("ok"):
         out = r.get("stdout", "")
@@ -684,7 +684,7 @@ def exec_batch():
         return
     for cmd in cmds:
         console.print(f"\n  [cyan]>> {cmd}[/]")
-        d = _post(f"/api/instances/{inst['id']}/exec", {"cmd": cmd, "timeout": 30})
+        d = _post_inst(inst["hostname"], "/api/exec", {"cmd": cmd, "token": config.TOKEN, "timeout": 30}, msg="执行命令")
         r = d.get("result") or d
         if r.get("ok"):
             out = r.get("stdout", "")

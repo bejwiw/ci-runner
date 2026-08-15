@@ -27,13 +27,13 @@ def _api(method, url, data=None, timeout=60, token=None):
         return {"ok": False, "error": str(e)}
 
 
-def get(path, timeout=60):
+def get(path, timeout=20):
     return _api("GET", config.mgr(path), timeout=timeout)
 
-def post(path, data=None, timeout=90):
+def post(path, data=None, timeout=30):
     return _api("POST", config.mgr(path), data=data, timeout=timeout)
 
-def delete(path, timeout=60):
+def delete(path, timeout=20):
     return _api("DELETE", config.mgr(path), timeout=timeout)
 
 def get_url(url, timeout=60):
