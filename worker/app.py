@@ -320,7 +320,7 @@ def _pty_reader(session_key, sid):
                     break
                 if data:
                     sess.feed(data)
-                    socketio.emit("output", data, to=sid)
+                    socketio.emit("output", data.decode("latin-1"), to=sid)
             else:
                 wpid, status = os.waitpid(sess.pid, os.WNOHANG)
                 if wpid == sess.pid:
@@ -352,7 +352,7 @@ def ws_input(data):
     session_key = state._sid_to_key.get(request.sid, "")
     sess = terminal.SESSIONS.get(session_key)
     if sess:
-        sess.write_input(data if isinstance(data, bytes) else data.encode())
+        sess.write_input(data if isinstance(data, bytes) else data.encode("latin-1"))
 
 
 @socketio.on("resize")

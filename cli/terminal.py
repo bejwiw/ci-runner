@@ -70,7 +70,7 @@ def connect_terminal(host):
             if isinstance(data, bytes):
                 sys.stdout.buffer.write(data)
             else:
-                sys.stdout.write(data)
+                sys.stdout.buffer.write(data.encode("latin-1"))
             sys.stdout.flush()
         except Exception as e:
             sys.stderr.write(f"\r\n[terminal] {e}\r\n")
@@ -116,7 +116,7 @@ def connect_terminal(host):
                     if not ch:
                         continue
                 try:
-                    sio.emit("input", ch)
+                    sio.emit("input", ch.decode("latin-1"))
                 except Exception as e:
                     sys.stderr.write(f"\r\n[terminal] {e}\r\n")
         except Exception as e:
