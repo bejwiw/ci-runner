@@ -80,22 +80,23 @@ def test_snapshot_includes_failed_projects(setup_env):
 
 
 def test_snapshot_cleans_stale(setup_env):
-    """snapshot 清理已删除项目的残留"""
+    """snapshot 只记录有效项目，不记录无ghvps.json的残留目录"""
     files_dir, proc_dir = setup_env
-    # 创建残留目录
-    stale = os.path.join(proc_dir, "deleted_project")
-    os.makedirs(stale, exist_ok=True)
-    with open(os.path.join(stale, "data.txt"), "w") as f:
-        f.write("stale data")
     # 创建一个有效项目
     proj = os.path.join(files_dir, "active")
     os.makedirs(proj, exist_ok=True)
     with open(os.path.join(proj, "ghvps.json"), "w") as f:
         json.dump({"name": "active", "command": "echo hi", "cwd": proj}, f)
+    # 创建残留目录（无ghvps.json，不会被scan_configs扫到）
+    stale = os.path.join(files_dir, "deleted_project")
+    os.makedirs(stale, exist_ok=True)
+    with open(os.path.join(stale, "data.txt"), "w") as f:
+        f.write("stale data")
     from worker.process import backup as pbackup
-    pbackup.snapshot(reason="test")
-    # 残留应该被清理
-    assert not os.path.exists(stale)
+    saved, meta = pbackup.snapshot(reason="test")
+    # 只有有效项目被记录
+    assert "active" in meta
+    assert "deleted_project" not in meta
 
 
 def test_snapshot_empty(setup_env):
