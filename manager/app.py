@@ -286,6 +286,10 @@ def worker_timeline(inst_id):
 def worker_stats_api(inst_id):
     stats = store.get_worker_stats(inst_id)
     hb = state.worker_heartbeats.get(inst_id, {})
+    # instance_report 会把 last_seen 等存入 stats，展开前排除
+    # 避免与显式字段重复导致 jsonify 报错
+    for _k in ("last_seen", "procs", "disk_pct"):
+        stats.pop(_k, None)
     return jsonify(ok=True, **stats,
         last_seen=hb.get("last_seen", 0),
         procs=hb.get("procs", 0),
