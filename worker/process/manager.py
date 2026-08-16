@@ -143,6 +143,12 @@ class ProcessManager:
         return result
 
     def get_process_log(self, name, limit=200):
+        """读取进程日志。优先用 ghvps.json 里配置的 log_file，
+        没有则用 logs/<name>.log（修复日志文件名与进程名不匹配的问题）"""
+        cfg = pconfig.load_proc_config(name) or {}
+        log_file = cfg.get("log_file", "")
+        if log_file and os.path.isfile(log_file):
+            return log.read_process_log_file(log_file, limit=limit)
         return log.read_process_log(name, limit=limit)
 
     def monitor_loop(self):

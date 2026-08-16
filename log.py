@@ -215,9 +215,14 @@ def process_logger(name):
 
 
 def read_process_log(name, limit=200):
-    """读取进程日志"""
+    """读取进程日志（按进程名，logs/<name>.log）"""
     path = os.path.join(config.LOGS_DIR, f"{name}.log")
-    if not os.path.exists(path):
+    return read_process_log_file(path, limit=limit)
+
+
+def read_process_log_file(path, limit=200):
+    """读取进程日志（按完整路径）"""
+    if not path or not os.path.exists(path):
         return []
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
