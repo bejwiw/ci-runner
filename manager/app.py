@@ -136,11 +136,15 @@ def logs():
 def s3_status():
     if not state.s3pool:
         return jsonify(ok=False, error="S3 未初始化"), 503
+    from manager import store
     mgr = state.s3pool.get_status()
-    w_a = sum(hb.get("a_count_total", 0) for hb in state.worker_heartbeats.values())
-    w_b = sum(hb.get("b_count_total", 0) for hb in state.worker_heartbeats.values())
-    w_st = sum(hb.get("storage_mb", 0) for hb in state.worker_heartbeats.values())
-    w_cnt = len(state.worker_heartbeats)
+    # 只统计活跃（未关闭）实例的上报数据
+    active_ids = {i["id"] for i in store.list_instances() if not i.get("closed")}
+    active_hbs = {k: v for k, v in state.worker_heartbeats.items() if k in active_ids}
+    w_a = sum(hb.get("a_count_total", 0) for hb in active_hbs.values())
+    w_b = sum(hb.get("b_count_total", 0) for hb in active_hbs.values())
+    w_st = sum(hb.get("storage_mb", 0) for hb in active_hbs.values())
+    w_cnt = len(active_hbs)
     return jsonify(ok=True,
         ready=mgr.get("ready", False),
         total_accounts=mgr.get("total_accounts", 0),

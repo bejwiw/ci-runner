@@ -200,6 +200,7 @@ def close_instance(inst_id):
     if inst.get("mcp_tunnel_id"):
         tunnels.delete_tunnel(inst["mcp_tunnel_id"], inst.get("mcp_hostname", ""))
     store.purge_instance_data(inst_id)
+    state.worker_heartbeats.pop(inst_id, None)
     store.close_instance(inst_id)
     return jsonify(ok=True, msg=f"实例 {inst_id} 已关闭")
 
