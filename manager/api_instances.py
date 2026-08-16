@@ -106,24 +106,29 @@ def create_instance():
         accounts.sync_fork(account)
         time.sleep(2)
     except Exception as e:
-        logger.warning(f"[create] fork 异常: {e}")
+        logger.warning(f"fork 异常: {e}")
     try:
         tunnel_id, tunnel_token = tunnels.create_tunnel(hostname)
     except Exception as e:
         return jsonify(ok=False, error=f"创建隧道失败: {e}"), 500
+    mcp_enabled = d.get("mcp_enabled", True)
     mcp_hostname = f"mcp-{hostname}"
     mcp_tunnel_id = ""
     mcp_ttoken = ""
-    try:
-        mcp_tunnel_id, mcp_ttoken = tunnels.create_mcp_tunnel(mcp_hostname)
-    except Exception as e:
-        logger.warning(f"[create] MCP 隧道失败: {e}")
+    if mcp_enabled:
+        try:
+            mcp_tunnel_id, mcp_ttoken = tunnels.create_mcp_tunnel(mcp_hostname)
+        except Exception as e:
+            logger.warning(f"MCP 隧道失败: {e}")
+    else:
+        logger.info(f"MCP 未启用 (mcp_enabled=false)")
     inst_cfg = {
         "inst_id": inst_id, "hostname": hostname,
         "tunnel_token": tunnel_token, "tunnel_id": tunnel_id,
         "mcp_hostname": mcp_hostname, "mcp_tunnel_token": mcp_ttoken,
         "mcp_tunnel_id": mcp_tunnel_id,
         "account": account["name"], "account_repo": account["repo"],
+        "mcp_enabled": d.get("mcp_enabled", True),
     }
     store.save_instance_config(inst_id, inst_cfg)
     try:
@@ -141,7 +146,7 @@ def create_instance():
         "closed": False, "created_at": time.time(),
     }
     store.add_instance(inst)
-    logger.info(f"[create] 实例 {inst_id} 创建中: https://{hostname}")
+    logger.info(f"实例 {inst_id} 创建中: https://{hostname}")
     return jsonify(ok=True, instance=inst, msg=f"实例 {inst_id} 创建中")
 
 
@@ -244,7 +249,7 @@ def instance_report(inst_id):
         cfg = store.load_instance_config(inst_id)
         if cfg:
             inst = store.get_or_create_instance(inst_id, cfg)
-            logger.info(f"[report] 实例 {inst_id} 已自愈恢复")
+            logger.info(f"实例 {inst_id} 已自愈恢复")
         else:
             return jsonify(ok=False, error=f"实例 {inst_id} 不存在且无配置"), 404
     # 防御：重启中不改状态（worker 收到 /api/shutdown 后会设 shutting_down 停止上报，
@@ -376,7 +381,7 @@ def shutdown_complete(inst_id):
     if not _authed():
         return jsonify(ok=False, error="未授权"), 401
     state.shutdown_notifications[inst_id] = time.time()
-    logger.info(f"[restart] {inst_id} 备份完成通知")
+    logger.info(f"{inst_id} 备份完成通知")
     return jsonify(ok=True)
 
 
@@ -395,17 +400,17 @@ def _restart_worker(inst_id, inst):
                 timeout=30, retries=1)
             if status == 200:
                 shutdown_ok = True
-                logger.info(f"[restart] {inst_id} 优雅关闭已通知")
+                logger.info(f"{inst_id} 优雅关闭已通知")
             else:
-                logger.warning(f"[restart] {inst_id} shutdown 返回 {status}")
+                logger.warning(f"{inst_id} shutdown 返回 {status}")
         except Exception as e:
-            logger.warning(f"[restart] {inst_id} 通知失败: {e}")
+            logger.warning(f"{inst_id} 通知失败: {e}")
 
     # 2. 等待实例退出（收到通知 或 60秒超时 或 实例不可达）
     if shutdown_ok:
         for _ in range(60):
             if inst_id in state.shutdown_notifications:
-                logger.info(f"[restart] {inst_id} 备份完成，准备触发新 worker")
+                logger.info(f"{inst_id} 备份完成，准备触发新 worker")
                 break
             # 检查实例是否已退出
             try:
@@ -422,14 +427,14 @@ def _restart_worker(inst_id, inst):
     account = next((a for a in accounts.load_accounts()
                     if a["name"] == inst.get("account")), None)
     if not account:
-        logger.error(f"[restart] {inst_id} 找不到账号")
+        logger.error(f"{inst_id} 找不到账号")
         store.update_instance(inst_id, status="restart_failed")
         return
     repo = account.get("repo") or config.REPO
     url = f"{ghapi.API_BASE}/repos/{repo}/actions/workflows/{config.WORKER_WORKFLOW}/dispatches"
     ghapi.gh_request("POST", url, token=account.get("token"),
                      data={"ref": "main", "inputs": {"INSTANCE_ID": inst_id}})
-    logger.info(f"[restart] {inst_id} 已触发新 worker")
+    logger.info(f"{inst_id} 已触发新 worker")
 
     # 4. 监控新实例启动（每10秒，最多5分钟）
     import time as _t
@@ -441,11 +446,11 @@ def _restart_worker(inst_id, inst):
             with urllib.request.urlopen(req, timeout=10) as r:
                 if r.status == 200:
                     store.update_instance(inst_id, status="running")
-                    logger.info(f"[restart] {inst_id} 重启成功")
+                    logger.info(f"{inst_id} 重启成功")
                     return
         except Exception:
             pass
         _t.sleep(10)
     # 超时
     store.update_instance(inst_id, status="restart_failed")
-    logger.error(f"[restart] {inst_id} 重启超时（5分钟未恢复），需手动处理")
+    logger.error(f"{inst_id} 重启超时（5分钟未恢复），需手动处理")

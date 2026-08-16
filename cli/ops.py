@@ -695,6 +695,26 @@ def exec_batch():
             _err(d.get("error", r.get("error", str(d))))
 
 
+def toggle_mcp():
+    """启动/关闭 MCP 服务（配置持久化，续命时自动读取）"""
+    inst = pick_instance()
+    if not inst:
+        return
+    console.print("  [1] 启动 MCP")
+    console.print("  [2] 关闭 MCP")
+    choice = _input("  选择: ")
+    if choice is None:
+        return
+    enabled = choice == "1"
+    d = _post_inst(inst["hostname"], "/api/mcp/toggle",
+                   {"token": config.TOKEN, "enabled": enabled}, msg="切换MCP")
+    ok, data = api.check(d)
+    if ok:
+        _ok(data.get("msg", "操作成功"))
+    else:
+        _err(data)
+
+
 def resource_monitor():
     inst = pick_instance()
     if not inst:

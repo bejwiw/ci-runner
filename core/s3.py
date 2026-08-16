@@ -108,15 +108,15 @@ class S3Pool:
             raw = self._get_client(0).get(ACCOUNTS_KEY, prefix="")
             if raw:
                 self._accounts = _parse_accounts(raw.decode("utf-8"))
-                logger.info(f"[s3] 加载了 {len(self._accounts)} 个数据账号")
+                logger.info(f"加载了 {len(self._accounts)} 个数据账号")
             else:
-                logger.error("[s3] bootstrap 桶中无账号列表")
+                logger.error("bootstrap 桶中无账号列表")
                 return False
         except Exception as e:
-            logger.error(f"[s3] 下载账号列表失败: {e}")
+            logger.error(f"下载账号列表失败: {e}")
             return False
         self._hash_ring.build(len(self._accounts))
-        logger.info(f"[s3] 哈希环构建完成: {self._hash_ring.size} 个虚拟节点")
+        logger.info(f"哈希环构建完成: {self._hash_ring.size} 个虚拟节点")
         now = time.gmtime()
         current_month = now.tm_year * 12 + now.tm_mon
         for i in range(len(self._accounts)):
@@ -136,7 +136,7 @@ class S3Pool:
 
     def start_recovery(self):
         threading.Thread(target=self._recovery_loop, daemon=True).start()
-        logger.info("[s3] 恢复探测线程已启动")
+        logger.info("恢复探测线程已启动")
 
     # ==================== S3 底层 ====================
     def _get_client(self, idx):
@@ -198,11 +198,11 @@ class S3Pool:
             if fc >= UNAVAILABLE_THRESHOLD:
                 c["status"] = "unavailable"
                 if old != "unavailable":
-                    logger.warning(f"[s3] 账号{idx} → unavailable ({fc}次失败: {c['last_error'][:80]})")
+                    logger.warning(f"账号{idx} → unavailable ({fc}次失败: {c['last_error'][:80]})")
             elif fc >= DEGRADED_THRESHOLD:
                 c["status"] = "degraded"
                 if old == "active":
-                    logger.info(f"[s3] 账号{idx} → degraded ({fc}次失败)")
+                    logger.info(f"账号{idx} → degraded ({fc}次失败)")
 
     def _record_success(self, idx):
         with self._lock:
@@ -220,7 +220,7 @@ class S3Pool:
             return False
         account_idx = self._select_account(key)
         if account_idx is None:
-            logger.error(f"[s3] 无可用账号写入 {key}")
+            logger.error(f"无可用账号写入 {key}")
             return False
         for attempt in range(MAX_RETRIES):
             try:
@@ -231,7 +231,7 @@ class S3Pool:
                     self._record_success(account_idx)
                     return True
             except Exception as e:
-                logger.warning(f"[s3] 写入 {key} 到账号{account_idx} 失败(第{attempt+1}次): {e}")
+                logger.warning(f"写入 {key} 到账号{account_idx} 失败(第{attempt+1}次): {e}")
                 self._record_failure(account_idx, e)
         return self._put_fallback(key, data, [account_idx])
 
@@ -247,12 +247,12 @@ class S3Pool:
                         self._counters[account_idx]["a_count"] += 1
                         self._counters[account_idx]["used_bytes"] += len(data)
                     self._record_success(account_idx)
-                    logger.info(f"[s3] fallback 写入 {key} 到账号{account_idx}")
+                    logger.info(f"fallback 写入 {key} 到账号{account_idx}")
                     return True
             except Exception as e:
-                logger.warning(f"[s3] fallback {key} 到账号{account_idx} 失败: {e}")
+                logger.warning(f"fallback {key} 到账号{account_idx} 失败: {e}")
                 self._record_failure(account_idx, e)
-        logger.error(f"[s3] {key} 所有 fallback 都失败")
+        logger.error(f"{key} 所有 fallback 都失败")
         return False
 
     # ==================== 读取 ====================
@@ -270,7 +270,7 @@ class S3Pool:
                         self._record_success(account_idx)
                         return data
                 except Exception as e:
-                    logger.warning(f"[s3] 从账号{account_idx}读取 {key} 失败: {e}")
+                    logger.warning(f"从账号{account_idx}读取 {key} 失败: {e}")
                     self._record_failure(account_idx, e)
         nearby = self._hash_ring.get_nearby_accounts(key, MAX_SCAN)
         for alt_idx in nearby:
@@ -284,7 +284,7 @@ class S3Pool:
                     with self._lock:
                         self._counters[alt_idx]["b_count"] += 1
                     self._record_success(alt_idx)
-                    logger.info(f"[s3] 从账号{alt_idx}遍历找到 {key}")
+                    logger.info(f"从账号{alt_idx}遍历找到 {key}")
                     return data
             except Exception as e:
                 self._record_failure(alt_idx, e)
@@ -308,9 +308,9 @@ class S3Pool:
                     Bucket=client.bucket, Key=f"{S3_PREFIX}/{key}")
                 file_size = head.get("ContentLength", 0) or 0
             except ClientError as e:
-                logger.debug(f"[s3] head_object {key} 失败: {e}")
+                logger.debug(f"head_object {key} 失败: {e}")
             except Exception as e:
-                logger.debug(f"[s3] head_object {key} 异常: {e}")
+                logger.debug(f"head_object {key} 异常: {e}")
             client.delete(key)
             with self._lock:
                 self._counters[account_idx]["a_count"] += 1
@@ -320,7 +320,7 @@ class S3Pool:
             self._record_success(account_idx)
             return True
         except Exception as e:
-            logger.warning(f"[s3] 删除 {key} 失败: {e}")
+            logger.warning(f"删除 {key} 失败: {e}")
             self._record_failure(account_idx, e)
             return False
 
@@ -354,7 +354,7 @@ class S3Pool:
         try:
             return self._get_client(0).get(ACCOUNTS_KEY, prefix="")
         except Exception as e:
-            logger.error(f"[s3] 读取账号列表失败: {e}")
+            logger.error(f"读取账号列表失败: {e}")
             return None
 
     # ==================== 恢复探测 ====================
@@ -368,7 +368,7 @@ class S3Pool:
                 self._check_monthly_reset()
                 self.save_state()
             except Exception as e:
-                logger.error(f"[s3] 恢复探测异常: {e}")
+                logger.error(f"恢复探测异常: {e}")
 
     def _probe_unavailable(self):
         with self._lock:
@@ -376,7 +376,7 @@ class S3Pool:
                           if c.get("status") == "unavailable" and idx > 0]
         if not candidates:
             return
-        logger.info(f"[s3] 探测 {len(candidates)} 个 unavailable 账号")
+        logger.info(f"探测 {len(candidates)} 个 unavailable 账号")
         for idx in candidates:
             try:
                 test_key = f"_healthcheck/{idx}"
@@ -385,7 +385,7 @@ class S3Pool:
                 if data == b"ok":
                     self._get_client(idx).delete(test_key)
                     self._record_success(idx)
-                    logger.info(f"[s3] 账号{idx} 恢复为 active")
+                    logger.info(f"账号{idx} 恢复为 active")
             except Exception as e:
                 with self._lock:
                     c = self._counters.get(idx, {})
@@ -403,7 +403,7 @@ class S3Pool:
                     c["status"] = "active"
                     c["fail_count"] = 0
                     c["month"] = current_month
-                    logger.info(f"[s3] 账号{idx} 月度重置")
+                    logger.info(f"账号{idx} 月度重置")
 
     # ==================== 计数器持久化 ====================
     # 计数器持久化 key（按 owner 区分，防止 Manager/Worker 互相覆盖）
@@ -417,9 +417,9 @@ class S3Pool:
         try:
             data = json.dumps(state, ensure_ascii=False).encode()
             self._get_client(0).put(f"meta/s3-counters-{self._owner}.json", data)
-            logger.info(f"[s3] 计数器已持久化 ({len(state)} 账号)")
+            logger.info(f"计数器已持久化 ({len(state)} 账号)")
         except Exception as e:
-            logger.warning(f"[s3] 计数器持久化失败: {e}")
+            logger.warning(f"计数器持久化失败: {e}")
 
     def load_state(self):
         """从 bootstrap 桶恢复计数器"""
@@ -448,9 +448,9 @@ class S3Pool:
                 c["last_success"] = saved.get("last_success", 0)
                 c["month"] = saved.get("month", current_month)
                 restored += 1
-            logger.info(f"[s3] 恢复 {restored} 个账号计数器")
+            logger.info(f"恢复 {restored} 个账号计数器")
         except Exception as e:
-            logger.warning(f"[s3] 恢复计数器失败: {e}")
+            logger.warning(f"恢复计数器失败: {e}")
 
 
     # ==================== 分片存储（大文件）====================
@@ -468,7 +468,7 @@ class S3Pool:
     def _put_file_chunked(self, key, file_path, file_size):
         """分片并发上传大文件"""
         num_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
-        logger.info(f"[s3] 分片上传 {key}: {file_size}B -> {num_chunks}块")
+        logger.info(f"分片上传 {key}: {file_size}B -> {num_chunks}块")
 
         def upload_chunk(idx):
             offset = idx * CHUNK_SIZE
@@ -513,7 +513,7 @@ class S3Pool:
             results = list(executor.map(upload_chunk, range(num_chunks)))
         for idx, account in results:
             if account is None:
-                logger.error(f"[s3] 分片{idx}上传失败, {key}整体失败")
+                logger.error(f"分片{idx}上传失败, {key}整体失败")
                 return False
         locations = [{"chunk": idx, "account": acct} for idx, acct in results]
         manifest = json.dumps({
@@ -521,7 +521,7 @@ class S3Pool:
             "total_size": file_size, "locations": locations,
         }).encode()
         self.put(f"{key}.manifest", manifest)
-        logger.info(f"[s3] 分片上传完成: {key} ({num_chunks}块)")
+        logger.info(f"分片上传完成: {key} ({num_chunks}块)")
         return True
 
     def get_to_file(self, key, file_path):
@@ -547,7 +547,7 @@ class S3Pool:
         total_size = manifest["total_size"]
         chunk_size = manifest["chunk_size"]
         locations = manifest["locations"]
-        logger.info(f"[s3] 分片下载 {key}: {total_size}B -> {num_chunks}块")
+        logger.info(f"分片下载 {key}: {total_size}B -> {num_chunks}块")
         with open(file_path, "wb") as f:
             f.truncate(total_size)
 
@@ -587,13 +587,13 @@ class S3Pool:
             results = list(executor.map(download_chunk, locations))
         for idx, data in results:
             if data is None:
-                logger.error(f"[s3] 分片{idx}下载失败")
+                logger.error(f"分片{idx}下载失败")
                 return False
             offset = idx * chunk_size
             with open(file_path, "r+b") as f:
                 f.seek(offset)
                 f.write(data)
-        logger.info(f"[s3] 分片下载完成: {key} ({num_chunks}块)")
+        logger.info(f"分片下载完成: {key} ({num_chunks}块)")
         return True
 
 

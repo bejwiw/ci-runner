@@ -2,25 +2,12 @@
 """
 ghbox 统一日志系统
 
-四级输出：控制台 + 内存环形缓冲（可查询）+ 文件（自动轮转）+ 请求日志（异步）
-结构化字段：时间 / 级别 / 模块 / JOB_ID
-进程日志：持久化进程独立日志文件
-资源监控：CPU/内存/磁盘
+格式：[北京时间] [级别] [模块] 消息
+功能：控制台输出 + 内存环形缓冲（可查询）+ 文件轮转 + 请求日志（异步）+ 进程日志 + 资源监控
 """
 import os
 import time
 import datetime
-import logging
-
-def _bj_time():
-    """北京时间"""
-    return datetime.timezone(datetime.timedelta(hours=8))
-
-class _BJFormatter(logging.Formatter):
-    def formatTime(self, record, datefmt=None):
-        ct = datetime.datetime.fromtimestamp(record.created, tz=_bj_time())
-        return ct.strftime(datefmt or "%Y-%m-%d %H:%M:%S")
-
 import threading
 import subprocess
 from logging.handlers import RotatingFileHandler
@@ -35,6 +22,19 @@ LOG_FILE_MAX_BYTES = 10 * 1024 * 1024
 LOG_FILE_BACKUP = 5
 JOB_ID = os.environ.get("GHBOX_JOB_ID", "")
 
+
+def _bj_time():
+    """北京时间时区"""
+    return datetime.timezone(datetime.timedelta(hours=8))
+
+
+class _BJFormatter(RotatingFileHandler.__class__ and __import__("logging").Formatter):
+    """北京时间格式化器"""
+    def formatTime(self, record, datefmt=None):
+        ct = datetime.datetime.fromtimestamp(record.created, tz=_bj_time())
+        return ct.strftime(datefmt or "%Y-%m-%d %H:%M:%S")
+
+
 # 内存环形缓冲
 _ring = []
 _ring_lock = threading.Lock()
@@ -45,7 +45,8 @@ _loggers = {}
 _loggers_lock = threading.Lock()
 
 
-class RingBufferHandler(logging.Handler):
+class RingBufferHandler(__import__("logging").Handler):
+    """内存环形缓冲 handler"""
     def emit(self, record):
         try:
             entry = {
@@ -60,9 +61,9 @@ class RingBufferHandler(logging.Handler):
                 if len(_ring) > MAX_RING_LINES:
                     del _ring[:len(_ring) - MAX_RING_LINES]
             with _stats_lock:
-                if record.levelno >= logging.ERROR:
+                if record.levelno >= 40:
                     _stats["error"] += 1
-                elif record.levelno >= logging.WARNING:
+                elif record.levelno >= 30:
                     _stats["warning"] += 1
                 else:
                     _stats["info"] += 1
@@ -70,7 +71,8 @@ class RingBufferHandler(logging.Handler):
             pass
 
 
-class ContextFilter(logging.Filter):
+class ContextFilter(__import__("logging").Filter):
+    """上下文过滤器：注入模块名和 JOB_ID"""
     def filter(self, record):
         name = getattr(record, "name", "")
         record.module = name.split(".")[-1] if name else ""
@@ -93,6 +95,7 @@ def clear_logs():
 
 def setup_logger(name="ghbox"):
     """获取/创建统一 logger"""
+    import logging
     with _loggers_lock:
         if name in _loggers:
             return _loggers[name]
@@ -101,7 +104,7 @@ def setup_logger(name="ghbox"):
             logger.setLevel(LOG_LEVEL)
             fmt = _BJFormatter(
                 "%(asctime)s [%(levelname)s] %(module)s: %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S")  # 北京时间
+                datefmt="%Y-%m-%d %H:%M:%S")
             logger.addHandler(logging.StreamHandler())
             rb = RingBufferHandler()
             rb.setFormatter(_BJFormatter("%(message)s"))
@@ -119,6 +122,7 @@ def setup_logger(name="ghbox"):
 
 
 def get_logs(limit=500, level=None, module=None, keyword=None):
+    """查询内存日志"""
     levels = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}
     min_lv = levels.get(level, 0)
     with _ring_lock:
@@ -136,6 +140,7 @@ def get_logs(limit=500, level=None, module=None, keyword=None):
 
 
 def get_stats():
+    """获取日志统计"""
     with _stats_lock:
         return dict(_stats)
 
@@ -147,6 +152,7 @@ _req_started = False
 
 
 def request_logger(app):
+    """Flask 请求日志中间件"""
     global _req_started
     from flask import request
 
@@ -191,6 +197,8 @@ def _req_writer():
 
 # ==================== 进程日志 ====================
 def process_logger(name):
+    """持久化进程独立日志"""
+    import logging
     os.makedirs(config.LOGS_DIR, exist_ok=True)
     path = os.path.join(config.LOGS_DIR, f"{name}.log")
     lg = logging.getLogger(f"proc.{name}")
@@ -207,6 +215,7 @@ def process_logger(name):
 
 
 def read_process_log(name, limit=200):
+    """读取进程日志"""
     path = os.path.join(config.LOGS_DIR, f"{name}.log")
     if not os.path.exists(path):
         return []
@@ -219,6 +228,7 @@ def read_process_log(name, limit=200):
 
 # ==================== 资源监控 ====================
 def get_resource_stats():
+    """获取 CPU/内存/磁盘资源"""
     result = {}
     try:
         with open("/proc/meminfo") as f:

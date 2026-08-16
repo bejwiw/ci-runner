@@ -36,22 +36,22 @@ class TunnelManager:
         token = self._get_token()
         host = self._get_host()
         if not token:
-            logger.warning("[tunnel] 无 token，跳过")
+            logger.warning("无 token，跳过")
             return False
         self.url = f"https://{host}"
         try:
             self.proc = subprocess.Popen(
                 ["cloudflared", "tunnel", "--no-autoupdate", "run", "--token", token],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            logger.info(f"[tunnel] 启动: {self.url} (pid={self.proc.pid})")
+            logger.info(f"启动: {self.url} (pid={self.proc.pid})")
             for line in self.proc.stdout:
                 if "Registered tunnel connection" in line.strip():
                     self.registered = True
-                    logger.info("[tunnel] 连接已注册")
-            logger.warning("[tunnel] 隧道进程退出")
+                    logger.info("连接已注册")
+            logger.warning("隧道进程退出")
             return self.registered
         except Exception as e:
-            logger.error(f"[tunnel] 启动失败: {e}")
+            logger.error(f"启动失败: {e}")
             return False
 
     def start_async(self):
@@ -63,6 +63,6 @@ class TunnelManager:
                 self.proc.terminate()
                 self.proc.kill()
             except Exception as e:
-                logger.debug(f"[tunnel] stop异常: {e}")
+                logger.debug(f"stop异常: {e}")
         self.proc = None
         self.registered = False

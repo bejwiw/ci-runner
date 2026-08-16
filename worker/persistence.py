@@ -68,7 +68,7 @@ def backup_files_to_bytes():
         ["sudo", "tar", "--zstd", "-cf", "-", "-C", os.path.dirname(config.FILES_DIR), os.path.basename(config.FILES_DIR)],
         capture_output=True, timeout=180)
     if result.returncode != 0:
-        logger.error(f"[persist] 文件打包失败: {result.stderr.decode(errors='replace')[:200]}")
+        logger.error(f"文件打包失败: {result.stderr.decode(errors='replace')[:200]}")
         return None
     return result.stdout
 
@@ -84,21 +84,21 @@ def restore_files_from_bytes(data):
             ["sudo", "tar", "xzf", tmp, "-C", os.path.expanduser("~")],
             capture_output=True, timeout=180)
         if result.returncode != 0:
-            logger.error(f"[persist] 文件解压失败: {result.stderr.decode(errors='replace')[:200]}")
+            logger.error(f"文件解压失败: {result.stderr.decode(errors='replace')[:200]}")
             return False
         os.makedirs(config.FILES_DIR, exist_ok=True)
         subprocess.run(["sudo", "rm", "-rf", config.PROC_DIR], timeout=30)
         os.makedirs(config.PROC_DIR, exist_ok=True)
-        logger.info(f"[persist] 文件恢复完成 ({len(data)} 字节)")
+        logger.info(f"文件恢复完成 ({len(data)} 字节)")
         return True
     except Exception as e:
-        logger.error(f"[persist] 文件恢复失败: {e}")
+        logger.error(f"文件恢复失败: {e}")
         return False
     finally:
         try:
             os.remove(tmp)
         except Exception as e:
-            logger.debug(f"[persist] S3操作失败: {e}")
+            logger.debug(f"S3操作失败: {e}")
 
 
 # ==================== 备份/恢复 ====================
@@ -118,14 +118,14 @@ def load_or_create(inst_cfg):
         try:
             db_data = _s3pool.get(db_key)
         except Exception as e:
-            logger.warning(f"[persist] S3 数据库读取失败: {e}")
+            logger.warning(f"S3 数据库读取失败: {e}")
     if db_data is None:
         db_data = releases.download_chunked(db_asset)
     if db_data:
         with open(config.DB_FILE, "wb") as f:
             f.write(db_data)
         status_msg = f"恢复数据库（{len(db_data)} 字节）"
-        logger.info(f"[persist] {status_msg}")
+        logger.info(f"{status_msg}")
     else:
         create_new_db()
 
@@ -137,7 +137,7 @@ def load_or_create(inst_cfg):
         try:
             files_ok = _s3pool.get_to_file(files_key, tmp_files)
         except Exception as e:
-            logger.warning(f"[persist] S3 文件读取失败: {e}")
+            logger.warning(f"S3 文件读取失败: {e}")
     if not files_ok:
         files_data = releases.download_chunked(files_asset)
         if files_data:
@@ -149,7 +149,7 @@ def load_or_create(inst_cfg):
     try:
         os.remove(tmp_files)
     except Exception as e:
-        logger.debug(f"[persist] 操作失败: {e}")
+        logger.debug(f"操作失败: {e}")
 
     os.makedirs(config.FILES_DIR, exist_ok=True)
     return status_msg
@@ -165,17 +165,17 @@ def backup_database(inst_cfg=None):
         try:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         except Exception as e:
-            logger.debug(f"[persist] S3操作失败: {e}")
+            logger.debug(f"S3操作失败: {e}")
     with open(config.DB_FILE, "rb") as f:
         data = f.read()
     # S3（不加密，S3本身私有访问）
     if _s3pool and _s3pool.is_ready():
         if _s3pool.put(db_key, data):
-            logger.info(f"[backup] 数据库 → S3 ({len(data)} 字节)")
+            logger.info(f"数据库 → S3 ({len(data)} 字节)")
             return len(data), 1
     # Releases（upload_chunked内部自动加密）
     size, parts = releases.upload_chunked(db_asset, data)
-    logger.info(f"[backup] 数据库 → Releases ({size} 字节, {parts} 分片)")
+    logger.info(f"数据库 → Releases ({size} 字节, {parts} 分片)")
     return size, parts
 
 
@@ -192,21 +192,21 @@ def backup_files(inst_cfg=None):
     # S3（分片上传，不经过内存）
     if _s3pool and _s3pool.is_ready():
         _s3pool.put_file(files_key, tmp)
-        logger.info(f"[backup] 文件 → S3 ({file_size} 字节)")
+        logger.info(f"文件 → S3 ({file_size} 字节)")
     # Releases（<50MB双写，>=50MB跳过避免GitHub API超限）
     if file_size < 50 * 1024 * 1024:
         with open(tmp, "rb") as f:
             data = f.read()
         size, parts = releases.upload_chunked(files_asset, data)
-        logger.info(f"[backup] 文件 → Releases ({size} 字节)")
+        logger.info(f"文件 → Releases ({size} 字节)")
     else:
-        logger.info(f"[backup] 文件 >=50MB, 跳过Releases(S3分片存储)")
+        logger.info(f"文件 >=50MB, 跳过Releases(S3分片存储)")
         size, parts = file_size, 1
     # 清理临时文件
     try:
         os.remove(tmp)
     except Exception as e:
-        logger.debug(f"[persist] 操作失败: {e}")
+        logger.debug(f"操作失败: {e}")
     return size, parts
 
 
@@ -220,11 +220,11 @@ def backup_files_to_disk():
             capture_output=True, timeout=300)
         subprocess.run(["sudo", "chown", "runner:runner", tmp], timeout=5)
         if result.returncode != 0:
-            logger.error(f"[persist] 文件打包失败: {result.stderr.decode(errors='replace')[:200]}")
+            logger.error(f"文件打包失败: {result.stderr.decode(errors='replace')[:200]}")
             return None
         return tmp
     except Exception as e:
-        logger.error(f"[persist] 文件打包异常: {e}")
+        logger.error(f"文件打包异常: {e}")
         return None
 
 
@@ -242,15 +242,15 @@ def restore_files_from_file(file_path):
                 ["sudo", "tar", "xzf", file_path, "-C", os.path.dirname(config.FILES_DIR), "--exclude=kodebite/stats.json"],
                 capture_output=True, timeout=300)
         if result.returncode != 0:
-            logger.error(f"[persist] 文件解压失败: {result.stderr.decode(errors='replace')[:200]}")
+            logger.error(f"文件解压失败: {result.stderr.decode(errors='replace')[:200]}")
             return False
         os.makedirs(config.FILES_DIR, exist_ok=True)
         subprocess.run(["sudo", "rm", "-rf", config.PROC_DIR], timeout=30)
         os.makedirs(config.PROC_DIR, exist_ok=True)
-        logger.info(f"[persist] 文件恢复完成")
+        logger.info(f"文件恢复完成")
         return True
     except Exception as e:
-        logger.error(f"[persist] 文件恢复失败: {e}")
+        logger.error(f"文件恢复失败: {e}")
         return False
 
 
@@ -262,7 +262,7 @@ def save_prev_backup(inst_cfg=None):
         if blob:
             releases.upload_chunked(f"{db_asset}.bak", blob)
     except Exception as e:
-        logger.warning(f"[persist] 保存快照失败: {e}")
+        logger.warning(f"保存快照失败: {e}")
 
 # ==================== 操作统计（stats.json） ====================
 STATS_FILE = os.path.join(config.FILES_DIR, "stats.json")
@@ -282,7 +282,7 @@ def save_stats(stats):
         with open(STATS_FILE, "w") as f:
             json.dump(stats, f, indent=2, ensure_ascii=False)
     except Exception as e:
-        logger.warning(f"[persist] stats保存失败: {e}")
+        logger.warning(f"stats保存失败: {e}")
 
 def record_backup(status, size_bytes, log_msg, a_delta=0, b_delta=0):
     """记录备份操作"""

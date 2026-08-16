@@ -52,13 +52,13 @@ def init_instance():
             f"meta/inst-config/{config.INSTANCE_ID}.json", default=None)
         if data and isinstance(data, dict):
             cfg = data
-            logger.info(f"[init] 从 S3 加载实例配置: {config.INSTANCE_ID}")
+            logger.info(f"从 S3 加载实例配置: {config.INSTANCE_ID}")
     if not cfg:
         cfg = releases.load_json_enc(f"inst-{config.INSTANCE_ID}.json.enc", default={})
         if cfg:
-            logger.info(f"[init] 从 Releases 加载实例配置: {config.INSTANCE_ID}")
+            logger.info(f"从 Releases 加载实例配置: {config.INSTANCE_ID}")
     state.inst_cfg = config.InstanceConfig(config.INSTANCE_ID, cfg)
-    logger.info(f"[init] 实例 {config.INSTANCE_ID}: host={state.inst_cfg.tunnel_host}")
+    logger.info(f"实例 {config.INSTANCE_ID}: host={state.inst_cfg.tunnel_host}")
     return state.inst_cfg
 
 
@@ -213,12 +213,12 @@ def backup_now():
         persistence.record_backup("success", _size,
             f"db={db_size}B files={res[0] if res else 0}MB elapsed={elapsed:.1f}s",
             _da, _db)
-        logger.info(f"[backup-now] 完成 ({elapsed:.1f}s)")
+        logger.info(f"完成 ({elapsed:.1f}s)")
         return jsonify(ok=True, db_size=db_size,
                        files_size=res[0] if res else 0, elapsed=round(elapsed, 1))
     except Exception as e:
         persistence.record_backup("failed", 0, str(e), 0, 0)
-        logger.error(f"[backup-now] 失败: {e}")
+        logger.error(f"失败: {e}")
         return jsonify(ok=False, error=str(e)), 500
     finally:
         _backup_running = False
@@ -228,6 +228,36 @@ def backup_now():
 @require_auth
 def term_screen():
     return jsonify(ok=True, screen=terminal.get_screen(request.args.get("session", "")))
+
+
+# ==================== MCP 开关 ====================
+@app.route("/api/mcp/toggle", methods=["POST"])
+def toggle_mcp():
+    """启动/关闭 MCP 服务（配置持久化，续命时自动读取）"""
+    data = request.get_json(silent=True) or {}
+    if not _check(data):
+        return jsonify(ok=False, error="未授权"), 401
+    enabled = data.get("enabled", True)
+    # 更新实例配置内存
+    if state.inst_cfg and state.inst_cfg.raw:
+        state.inst_cfg.raw["mcp_enabled"] = enabled
+    if enabled:
+        if not state.mcp_mgr:
+            try:
+                state.mcp_mgr = McpManager(state.inst_cfg)
+                state.mcp_mgr.start()
+                return jsonify(ok=True, msg="MCP 已启动")
+            except Exception as e:
+                return jsonify(ok=False, error=str(e)), 500
+        return jsonify(ok=True, msg="MCP 已在运行")
+    else:
+        if state.mcp_mgr:
+            try:
+                state.mcp_mgr.stop()
+            except Exception as e:
+                logger.debug(f"stop 异常: {e}")
+            state.mcp_mgr = None
+        return jsonify(ok=True, msg="MCP 已关闭")
 
 
 # ==================== 优雅关闭 ====================
@@ -242,7 +272,7 @@ def graceful_shutdown():
         import time as _t
         state.shutting_down = True  # 立即停止上报/备份/续命循环
         _t.sleep(1)  # 确保响应已发送
-        logger.warning("[shutdown] 收到优雅关闭请求，开始备份")
+        logger.warning("收到优雅关闭请求，开始备份")
         try:
             db_size, _ = persistence.backup_database(state.inst_cfg)
             res = persistence.backup_files(state.inst_cfg)
@@ -251,9 +281,9 @@ def graceful_shutdown():
             _size = int(db_size or 0) + int((res[0] if res else 0))
             persistence.record_backup("pre-shutdown", _size,
                 f"shutdown: db={db_size}B files={res[0] if res else 0}MB", 0, 0)
-            logger.info("[shutdown] 备份完成")
+            logger.info("备份完成")
         except Exception as e:
-            logger.error(f"[shutdown] 备份失败: {e}")
+            logger.error(f"备份失败: {e}")
         # 上报 manager
         try:
             from core.utils import http_request
@@ -263,8 +293,8 @@ def graceful_shutdown():
                 headers={"Content-Type": "application/json"},
                 timeout=10, retries=2)
         except Exception as e:
-            logger.warning(f"[shutdown] 上报失败: {e}")
-        logger.warning("[shutdown] 退出")
+            logger.warning(f"上报失败: {e}")
+        logger.warning("退出")
         os._exit(0)
 
     threading.Thread(target=_do_shutdown, daemon=True).start()
@@ -327,7 +357,7 @@ def _pty_reader(session_key, sid):
                     socketio.emit("exit", {"code": status}, to=sid)
                     break
     except Exception as e:
-        logger.debug(f"[worker] 信号处理异常: {e}")
+        logger.debug(f"信号处理异常: {e}")
 
 
 @socketio.on("connect")
@@ -363,7 +393,7 @@ def ws_resize(data):
         try:
             sess.resize(int(data.get("rows", 24)), int(data.get("cols", 80)))
         except Exception as e:
-            logger.debug(f"[worker] pty读取异常: {e}")
+            logger.debug(f"pty读取异常: {e}")
 
 
 @socketio.on("disconnect")
@@ -375,7 +405,7 @@ def ws_disconnect():
 
 # ==================== 优雅关闭 ====================
 def _signal_handler(signum, frame):
-    logger.warning(f"[shutdown] 信号 {signum}，最终快照")
+    logger.warning(f"信号 {signum}，最终快照")
     try:
         if state.proc_mgr:
             state.proc_mgr.final_snapshot()
@@ -384,14 +414,14 @@ def _signal_handler(signum, frame):
         if state.mcp_mgr:
             state.mcp_mgr.stop()
     except Exception as e:
-        logger.error(f"[shutdown] 备份失败: {e}")
+        logger.error(f"备份失败: {e}")
     os._exit(0)
 
 
 # ==================== 启动 ====================
 def run():
     t0 = time.time()
-    logger.info(f"[boot] === Worker 启动: {config.INSTANCE_ID} ===")
+    logger.info(f"=== Worker 启动: {config.INSTANCE_ID} ===")
 
     # S3 初始化
     bootstrap = os.environ.get("S3_BOOTSTRAP", "")
@@ -399,12 +429,12 @@ def run():
         state.s3pool = S3Pool(bootstrap, config.S3_ENDPOINT, config.S3_REGION, owner=config.INSTANCE_ID)
         if state.s3pool.init():
             persistence.set_s3pool(state.s3pool)
-            logger.info("[boot] S3 池初始化成功")
+            logger.info("S3 池初始化成功")
         else:
-            logger.error("[boot] S3 池初始化失败，降级 Releases")
+            logger.error("S3 池初始化失败，降级 Releases")
             state.s3pool = None
     else:
-        logger.warning("[boot] 无 S3_BOOTSTRAP，仅用 Releases")
+        logger.warning("无 S3_BOOTSTRAP，仅用 Releases")
 
     # 阶段1：最小启动
     init_instance()
@@ -416,7 +446,7 @@ def run():
     state.tunnel_mgr = TunnelManager(state.inst_cfg)
     JOB_STATE["last_url"] = state.tunnel_mgr.url
     state.tunnel_mgr.start_async()
-    logger.info(f"[boot] 隧道已异步启动: {state.tunnel_mgr.url} ({time.time()-t0:.1f}s)")
+    logger.info(f"隧道已异步启动: {state.tunnel_mgr.url} ({time.time()-t0:.1f}s)")
 
     # 进程管理器 + API
     state.proc_mgr = ProcessManager(state.inst_cfg, state.s3pool)
@@ -428,5 +458,5 @@ def run():
 
     # Flask 服务（阻塞）
     log.request_logger(app)
-    logger.info(f"[boot] Flask 端口 {config.PORT} ({time.time()-t0:.1f}s)")
+    logger.info(f"Flask 端口 {config.PORT} ({time.time()-t0:.1f}s)")
     socketio.run(app, host="0.0.0.0", port=config.PORT, allow_unsafe_werkzeug=True)

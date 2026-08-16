@@ -24,7 +24,7 @@ import config
 import log
 from core import utils
 
-logger = log.setup_logger("tunnel")
+logger = log.setup_logger("proc.tunnels")
 
 TUNNELS_SUBDIR = "tunnels"
 
@@ -38,7 +38,7 @@ def _parse_token(token):
         d = json.loads(decoded)
         return d.get("a", ""), d.get("t", ""), d.get("s", "")
     except Exception as e:
-        logger.warning(f"[tunnel] token 解析失败: {e}")
+        logger.warning(f"token 解析失败: {e}")
         return "", "", ""
 
 
@@ -92,9 +92,9 @@ def _update_config_yml_credentials(config_path, new_creds_path):
             content)
         with open(config_path, "w") as f:
             f.write(content)
-        logger.debug(f"[tunnel] config.yml credentials-file 已更新 → {new_creds_path}")
+        logger.debug(f"config.yml credentials-file 已更新 → {new_creds_path}")
     except Exception as e:
-        logger.warning(f"[tunnel] 更新 config.yml 失败: {e}")
+        logger.warning(f"更新 config.yml 失败: {e}")
 
 
 # ==================== 备份时复制/生成凭证文件 ====================
@@ -120,7 +120,7 @@ def copy_tunnel_files(cfg, proc_name, base_dir):
             try:
                 os.remove(os.path.join(tunnels_dir, f))
             except Exception as e:
-                logger.debug(f"[tunnel] 清理旧文件失败: {e}")
+                logger.debug(f"清理旧文件失败: {e}")
     os.makedirs(tunnels_dir, exist_ok=True)
 
     for tunnel in tunnels:
@@ -131,11 +131,11 @@ def copy_tunnel_files(cfg, proc_name, base_dir):
             # token + ingress → 从 token 生成 credentials.json + config.yml
             token = tunnel.get("token", "")
             if not token:
-                logger.warning(f"[tunnel] {proc_name}: token 为空，跳过")
+                logger.warning(f"{proc_name}: token 为空，跳过")
                 continue
             account, tunnel_id, secret = _parse_token(token)
             if not tunnel_id or not secret:
-                logger.warning(f"[tunnel] {proc_name}: token 解析失败，跳过")
+                logger.warning(f"{proc_name}: token 解析失败，跳过")
                 continue
             # 生成 credentials.json
             creds_path = os.path.join(tunnels_dir, uuid.uuid4().hex[:12] + ".json")
@@ -149,14 +149,14 @@ def copy_tunnel_files(cfg, proc_name, base_dir):
                     json.dump(creds_data, f)
                 tunnel["credentials_file"] = creds_path
                 tunnel["tunnel_id"] = tunnel_id
-                logger.info(f"[tunnel] {proc_name}: 从 token 生成 credentials.json")
+                logger.info(f"{proc_name}: 从 token 生成 credentials.json")
             except Exception as e:
-                logger.warning(f"[tunnel] {proc_name}: 生成 credentials.json 失败: {e}")
+                logger.warning(f"{proc_name}: 生成 credentials.json 失败: {e}")
                 continue
             # 生成 config.yml
             config_path = _generate_config_yml(tunnel_id, creds_path, ingress_rules, tunnels_dir)
             tunnel["config_file"] = config_path
-            logger.info(f"[tunnel] {proc_name}: 生成 config.yml（{len(ingress_rules)} 条 ingress）")
+            logger.info(f"{proc_name}: 生成 config.yml（{len(ingress_rules)} 条 ingress）")
 
         elif ttype == "credentials" and ingress_rules:
             # credentials + ingress → 复制 credentials_file → 生成 config.yml
@@ -167,18 +167,18 @@ def copy_tunnel_files(cfg, proc_name, base_dir):
                 try:
                     shutil.copy2(creds, dest)
                     tunnel["credentials_file"] = dest
-                    logger.info(f"[tunnel] {proc_name}: 复制凭证 → {os.path.basename(dest)}")
+                    logger.info(f"{proc_name}: 复制凭证 → {os.path.basename(dest)}")
                 except Exception as e:
-                    logger.warning(f"[tunnel] {proc_name}: 复制凭证失败: {e}")
+                    logger.warning(f"{proc_name}: 复制凭证失败: {e}")
                     continue
             elif creds:
-                logger.warning(f"[tunnel] {proc_name}: 凭证文件不存在: {creds}")
+                logger.warning(f"{proc_name}: 凭证文件不存在: {creds}")
                 continue
             # 生成 config.yml（用新路径 + ingress 规则）
             tid = tunnel.get("tunnel_id", "")
             config_path = _generate_config_yml(tid, tunnel.get("credentials_file", ""), ingress_rules, tunnels_dir)
             tunnel["config_file"] = config_path
-            logger.info(f"[tunnel] {proc_name}: 生成 config.yml（{len(ingress_rules)} 条 ingress）")
+            logger.info(f"{proc_name}: 生成 config.yml（{len(ingress_rules)} 条 ingress）")
 
         elif ttype == "credentials":
             # credentials 无 ingress → 复制 credentials_file + config_file，更新路径
@@ -189,11 +189,11 @@ def copy_tunnel_files(cfg, proc_name, base_dir):
                 try:
                     shutil.copy2(creds, dest)
                     tunnel["credentials_file"] = dest
-                    logger.info(f"[tunnel] {proc_name}: 复制凭证 → {os.path.basename(dest)}")
+                    logger.info(f"{proc_name}: 复制凭证 → {os.path.basename(dest)}")
                 except Exception as e:
-                    logger.warning(f"[tunnel] {proc_name}: 复制凭证失败: {e}")
+                    logger.warning(f"{proc_name}: 复制凭证失败: {e}")
             elif creds:
-                logger.warning(f"[tunnel] {proc_name}: 凭证文件不存在: {creds}")
+                logger.warning(f"{proc_name}: 凭证文件不存在: {creds}")
 
             cfile = tunnel.get("config_file", "")
             if cfile and os.path.exists(cfile):
@@ -205,11 +205,11 @@ def copy_tunnel_files(cfg, proc_name, base_dir):
                     # 更新 config.yml 里的 credentials-file 路径
                     if tunnel.get("credentials_file"):
                         _update_config_yml_credentials(dest, tunnel["credentials_file"])
-                    logger.info(f"[tunnel] {proc_name}: 复制配置 → {os.path.basename(dest)}")
+                    logger.info(f"{proc_name}: 复制配置 → {os.path.basename(dest)}")
                 except Exception as e:
-                    logger.warning(f"[tunnel] {proc_name}: 复制配置失败: {e}")
+                    logger.warning(f"{proc_name}: 复制配置失败: {e}")
             elif cfile:
-                logger.warning(f"[tunnel] {proc_name}: 配置文件不存在: {cfile}")
+                logger.warning(f"{proc_name}: 配置文件不存在: {cfile}")
 
         # token 无 ingress → 不复制任何文件（用 --token 方式启动）
 
@@ -234,7 +234,7 @@ def start_tunnels(cfg, known_entry, proc_name):
     for t in tunnels:
         name = t.get("name", "")
         if not name or name in seen:
-            logger.warning(f"[tunnel] 跳过重复或无名的隧道: {name}")
+            logger.warning(f"跳过重复或无名的隧道: {name}")
             continue
         seen.add(name)
         valid.append(t)
@@ -260,18 +260,18 @@ def start_tunnels(cfg, known_entry, proc_name):
             # 验证 credentials_file 是否存在（config 方式需要）
             creds = tunnel.get("credentials_file", "")
             if creds and not os.path.exists(creds):
-                logger.warning(f"[tunnel] {proc_name}/{name} 凭证文件不存在: {creds}，跳过")
+                logger.warning(f"{proc_name}/{name} 凭证文件不存在: {creds}，跳过")
                 continue
             cmd = f"cloudflared tunnel --no-autoupdate --config {config_file} run"
             if tid:
                 cmd += f" {tid}"
-            logger.info(f"[tunnel] {proc_name}/{name} 用 config 方式启动 (config={os.path.basename(config_file)})")
+            logger.info(f"{proc_name}/{name} 用 config 方式启动 (config={os.path.basename(config_file)})")
         elif token:
             # 无 config_file，用 token 方式启动
             cmd = f"cloudflared tunnel --no-autoupdate run --token {token}"
-            logger.info(f"[tunnel] {proc_name}/{name} 用 token 方式启动")
+            logger.info(f"{proc_name}/{name} 用 token 方式启动")
         else:
-            logger.warning(f"[tunnel] {proc_name}/{name} 无 config_file 且无 token，跳过")
+            logger.warning(f"{proc_name}/{name} 无 config_file 且无 token，跳过")
             continue
 
         # 启动
@@ -279,7 +279,7 @@ def start_tunnels(cfg, known_entry, proc_name):
         try:
             logf = open(log_path, "ab")
         except Exception as e:
-            logger.debug(f"[tunnel] 打开日志文件失败: {e}")
+            logger.debug(f"打开日志文件失败: {e}")
             logf = subprocess.DEVNULL
 
         try:
@@ -288,9 +288,9 @@ def start_tunnels(cfg, known_entry, proc_name):
                 start_new_session=True, executable="/bin/bash")
             known_entry["tunnel_pids"][name] = proc.pid
             token_disp = (token[:10] + "...") if token else ""
-            logger.info(f"[tunnel] {proc_name}/{name} 启动 (pid={proc.pid}, type={ttype}, token={token_disp})")
+            logger.info(f"{proc_name}/{name} 启动 (pid={proc.pid}, type={ttype}, token={token_disp})")
         except Exception as e:
-            logger.error(f"[tunnel] {proc_name}/{name} 启动失败: {e}")
+            logger.error(f"{proc_name}/{name} 启动失败: {e}")
 
     if not known_entry.get("tunnel_pids"):
         known_entry.pop("tunnel_pids", None)
@@ -307,8 +307,8 @@ def stop_tunnels(known_entry):
                 if utils.is_alive(pid):
                     os.kill(pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError) as e:
-                logger.debug(f"[tunnel] 停止进程失败: {e}")
-        logger.info(f"[tunnel] 停止 {name} (pid={pid})")
+                logger.debug(f"停止进程失败: {e}")
+        logger.info(f"停止 {name} (pid={pid})")
     known_entry.pop("tunnel_pids", None)
 
 
@@ -349,7 +349,7 @@ def check_and_restart(known_entry, proc_name):
     crashed = False
     for name, pid in list(pids.items()):
         if pid and not utils.is_alive(pid):
-            logger.warning(f"[tunnel] {proc_name}/{name} 崩溃 (pid={pid})，准备重启")
+            logger.warning(f"{proc_name}/{name} 崩溃 (pid={pid})，准备重启")
             crashed = True
 
     if crashed:

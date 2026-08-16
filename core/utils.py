@@ -27,7 +27,7 @@ def is_alive(pid):
     except (ProcessLookupError, ValueError, PermissionError):
         return False
     except Exception as e:
-        logger.debug(f"[utils] is_alive({pid}) 异常: {e}")
+        logger.debug(f"is_alive({pid}) 异常: {e}")
         return False
 
 
@@ -41,7 +41,7 @@ def dir_size_mb(path):
             try:
                 total += os.path.getsize(os.path.join(root, f))
             except OSError as e:
-                logger.debug(f"[utils] 获取文件大小失败 {f}: {e}")
+                logger.debug(f"获取文件大小失败 {f}: {e}")
     return round(total / (1024 * 1024), 2)
 
 
@@ -62,7 +62,7 @@ def copy_tree(src, dst, exclude=None):
                 shutil.copy2(s, d)
                 count += 1
             except OSError as e:
-                logger.warning(f"[utils] 复制失败 {s} -> {d}: {e}")
+                logger.warning(f"复制失败 {s} -> {d}: {e}")
     return count
 
 
@@ -86,7 +86,7 @@ def safe_remove(path):
         elif os.path.exists(path):
             os.remove(path)
     except OSError as e:
-        logger.debug(f"[utils] 删除 {path} 失败: {e}")
+        logger.debug(f"删除 {path} 失败: {e}")
 
 
 def elapsed_since(start_time):
@@ -141,10 +141,10 @@ def http_request(url, method="GET", data=None, headers=None,
             try:
                 raw = e.read()
             except Exception as ex:
-                logger.debug(f"[http] 读取 HTTPError body 失败: {ex}")
+                logger.debug(f"读取 HTTPError body 失败: {ex}")
             if e.code >= 500 and attempt < retries - 1:
                 delay = retry_delays[min(attempt, len(retry_delays) - 1)]
-                logger.debug(f"[http] {method} {url} -> {e.code}, {delay}s 重试({attempt+1}/{retries})")
+                logger.debug(f"{method} {url} -> {e.code}, {delay}s 重试({attempt+1}/{retries})")
                 time.sleep(delay)
                 continue
             if raw_response:
@@ -154,18 +154,18 @@ def http_request(url, method="GET", data=None, headers=None,
             last_error = e
             if attempt < retries - 1:
                 delay = retry_delays[min(attempt, len(retry_delays) - 1)]
-                logger.debug(f"[http] {method} {url} 网络错误: {e}, {delay}s 重试({attempt+1}/{retries})")
+                logger.debug(f"{method} {url} 网络错误: {e}, {delay}s 重试({attempt+1}/{retries})")
                 time.sleep(delay)
             else:
-                logger.warning(f"[http] {method} {url} 网络失败({retries}次): {e}")
+                logger.warning(f"{method} {url} 网络失败({retries}次): {e}")
         except Exception as e:
             last_error = e
             if attempt < retries - 1:
                 delay = retry_delays[min(attempt, len(retry_delays) - 1)]
-                logger.debug(f"[http] {method} {url} 异常: {e}, {delay}s 重试({attempt+1}/{retries})")
+                logger.debug(f"{method} {url} 异常: {e}, {delay}s 重试({attempt+1}/{retries})")
                 time.sleep(delay)
             else:
-                logger.error(f"[http] {method} {url} 异常({retries}次): {e}")
+                logger.error(f"{method} {url} 异常({retries}次): {e}")
     return 0, None
 
 

@@ -55,7 +55,7 @@ def write_pid_file(name, pid):
         with open(pid_file_path(name), "w") as f:
             f.write(str(pid))
     except Exception as e:
-        logger.warning(f"[config] {name}: 写PID文件失败: {e}")
+        logger.warning(f"{name}: 写PID文件失败: {e}")
 
 
 def read_pid_file(name):
@@ -72,7 +72,7 @@ def delete_pid_file(name):
     try:
         os.remove(pid_file_path(name))
     except Exception as e:
-        logger.debug(f"[config] 读取失败: {e}")
+        logger.debug(f"读取失败: {e}")
 
 
 def scan_configs():
@@ -87,7 +87,7 @@ def scan_configs():
     try:
         entries = os.listdir(base)
     except Exception as e:
-        logger.error(f"[config] 扫描 {base} 失败: {e}")
+        logger.error(f"扫描 {base} 失败: {e}")
         return configs
     for entry in entries:
         if entry in SKIP_DIRS:
@@ -99,7 +99,7 @@ def scan_configs():
             with open(ghvps_path) as f:
                 cfg = json.load(f)
         except Exception as e:
-            logger.warning(f"[config] {entry}: ghvps.json读取失败: {e}")
+            logger.warning(f"{entry}: ghvps.json读取失败: {e}")
             continue
         # name验证
         name = cfg.get("name", "").strip()
@@ -108,11 +108,11 @@ def scan_configs():
             cfg["name"] = name
         # command验证
         if not cfg.get("command", "").strip():
-            logger.warning(f"[config] {name}: command为空，跳过")
+            logger.warning(f"{name}: command为空，跳过")
             continue
         # bash终端会话跳过
         if is_bash_session(cfg):
-            logger.info(f"[config] {name}: bash终端会话，跳过")
+            logger.info(f"{name}: bash终端会话，跳过")
             continue
         # cwd验证：不在FILES_DIR下则跳过
         cwd = cfg.get("cwd", "").strip()
@@ -120,11 +120,11 @@ def scan_configs():
             cwd = os.path.join(base, entry)
             cfg["cwd"] = cwd
         if not cwd.startswith(config.FILES_DIR):
-            logger.warning(f"[config] {name}: cwd={cwd} 不在{config.FILES_DIR}下，跳过")
+            logger.warning(f"{name}: cwd={cwd} 不在{config.FILES_DIR}下，跳过")
             continue
         # name去重
         if name in configs:
-            logger.warning(f"[config] {name}: 重复配置，跳过")
+            logger.warning(f"{name}: 重复配置，跳过")
             continue
         cfg.setdefault("install", [])
         cfg.setdefault("exclude", list(DEFAULT_EXCLUDE))
@@ -159,7 +159,7 @@ def load_proc_config(name):
             with open(path) as f:
                 return json.load(f)
         except Exception as e:
-            logger.debug(f"[config] 写PID失败: {e}")
+            logger.debug(f"写PID失败: {e}")
     return None
 
 

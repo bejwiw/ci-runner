@@ -21,7 +21,7 @@ def start_background():
     """启动后台线程（仅在 leader 模式下调用）"""
     threading.Thread(target=_heal_loop, daemon=True).start()
     threading.Thread(target=_start_tunnel, daemon=True).start()
-    logger.info("[bg] 后台线程已启动")
+    logger.info("后台线程已启动")
 
 
 def _start_tunnel():
@@ -31,12 +31,12 @@ def _start_tunnel():
         proc = subprocess.Popen(
             ["cloudflared", "tunnel", "--no-autoupdate", "run", "--token", config.TUNNEL_TOKEN],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        logger.info(f"[tunnel] 管理隧道: https://{config.TUNNEL_HOST}")
+        logger.info(f"管理隧道: https://{config.TUNNEL_HOST}")
         for line in proc.stdout:
             if "Registered tunnel connection" in line.strip():
-                logger.info("[tunnel] 连接已注册")
+                logger.info("连接已注册")
     except Exception as e:
-        logger.error(f"[tunnel] 启动失败: {e}")
+        logger.error(f"启动失败: {e}")
 
 
 def _heal_loop():
@@ -52,20 +52,20 @@ def _heal_loop():
                 try:
                     state.s3pool.save_state()
                 except Exception as e:
-                    logger.warning(f"[heal] S3 状态持久化失败: {e}")
+                    logger.warning(f"S3 状态持久化失败: {e}")
             # 实例清单自愈
             insts = store.list_instances()
             if not insts:
                 empty_retries += 1
                 if empty_retries >= 3:
-                    logger.warning("[heal] 实例清单连续3次为空，触发自愈")
+                    logger.warning("实例清单连续3次为空，触发自愈")
                     _self_heal_instances()
                     empty_retries = 0
             else:
                 empty_retries = 0
                 _ensure_mcp_tunnels(insts)
         except Exception as e:
-            logger.error(f"[heal] 异常: {e}")
+            logger.error(f"异常: {e}")
 
 
 def _self_heal_instances():
@@ -99,12 +99,12 @@ def _self_heal_instances():
                                     "closed": False, "run_id": None,
                                 })
                         except Exception as e:
-                            logger.debug(f"[heal] 解密实例配置失败: {e}")
+                            logger.debug(f"解密实例配置失败: {e}")
         except Exception as e:
-            logger.warning(f"[heal] 扫描账号 {acc.get('name')} 失败: {e}")
+            logger.warning(f"扫描账号 {acc.get('name')} 失败: {e}")
     if result:
         store.save_instances(result)
-        logger.info(f"[heal] 实例清单已重建，共 {len(result)} 个")
+        logger.info(f"实例清单已重建，共 {len(result)} 个")
 
 
 def _ensure_mcp_tunnels(insts):
@@ -123,7 +123,7 @@ def _ensure_mcp_tunnels(insts):
             inst["mcp_tunnel_id"] = mcp_tid
             inst["mcp_url"] = f"https://{mcp_hostname}"
             changed = True
-            logger.info(f"[mcp] 为 {inst['id']} 创建 MCP 隧道: {mcp_hostname}")
+            logger.info(f"为 {inst['id']} 创建 MCP 隧道: {mcp_hostname}")
             account = next((a for a in accounts.load_accounts()
                            if a["name"] == inst.get("account")), None)
             if account:
@@ -136,6 +136,6 @@ def _ensure_mcp_tunnels(insts):
             if "already have a tunnel" in str(e) or "1013" in str(e):
                 pass
             else:
-                logger.warning(f"[mcp] {inst['id']} 创建失败: {e}")
+                logger.warning(f"{inst['id']} 创建失败: {e}")
     if changed:
         store.save_instances(insts)

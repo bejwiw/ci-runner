@@ -78,7 +78,7 @@ def _read_proc(pid):
             parts = f.read().split()
             ppid = int(parts[3]) if len(parts) > 3 else 0
     except Exception as e:
-        logger.debug(f"[scanner] 读取失败: {e}")
+        logger.debug(f"读取失败: {e}")
     user = ""
     try:
         with open(f"/proc/{pid}/status") as f:
@@ -91,17 +91,17 @@ def _read_proc(pid):
                         user = str(uid)
                     break
     except Exception as e:
-        logger.debug(f"[scanner] 读取失败: {e}")
+        logger.debug(f"读取失败: {e}")
     exe = ""
     try:
         exe = os.readlink(f"/proc/{pid}/exe")
     except Exception as e:
-        logger.debug(f"[scanner] 读取失败: {e}")
+        logger.debug(f"读取失败: {e}")
     cwd = ""
     try:
         cwd = os.readlink(f"/proc/{pid}/cwd")
     except Exception as e:
-        logger.debug(f"[scanner] 读取失败: {e}")
+        logger.debug(f"读取失败: {e}")
     return ProcessInfo(pid, ppid, user, cmdline, exe, cwd)
 
 
@@ -118,7 +118,7 @@ def find_self_worker_pids():
             if any(e in cmd for e in SELF_ENTRIES):
                 pids.add(info.pid)
     except Exception as e:
-        logger.debug(f"[scanner] 读取失败: {e}")
+        logger.debug(f"读取失败: {e}")
     return pids
 
 

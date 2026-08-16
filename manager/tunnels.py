@@ -66,7 +66,7 @@ def create_tunnel(hostname, service_url="http://127.0.0.1:8080"):
             {"hostname": hostname, "service": service_url},
             {"service": "http_status:404"}]}})
     if cfg_status not in (200, 201):
-        logger.warning(f"[tunnel] {hostname} ingress 配置更新失败: {cfg_status}")
+        logger.warning(f"{hostname} ingress 配置更新失败: {cfg_status}")
     # 3. DNS CNAME（处理已存在的记录）
     if config.CF_ZONE_ID:
         dns_status, dns_d = _cf_request("POST",
@@ -83,7 +83,7 @@ def create_tunnel(hostname, service_url="http://127.0.0.1:8080"):
                         f"https://api.cloudflare.com/client/v4/zones/{config.CF_ZONE_ID}/dns_records/{rec['id']}",
                         data={"type": "CNAME", "name": hostname,
                               "content": f"{tid}.cfargotunnel.com", "proxied": True})
-    logger.info(f"[tunnel] 隧道创建成功: {hostname} ({tid})")
+    logger.info(f"隧道创建成功: {hostname} ({tid})")
     return tid, ttoken
 
 
@@ -99,7 +99,7 @@ def delete_tunnel(tunnel_id, hostname):
     if config.CF_ACCOUNT_ID:
         _cf_request("DELETE",
             f"https://api.cloudflare.com/client/v4/accounts/{config.CF_ACCOUNT_ID}/cfd_tunnel/{tunnel_id}")
-    logger.info(f"[tunnel] 隧道已删除: {hostname}")
+    logger.info(f"隧道已删除: {hostname}")
 
 
 def create_mcp_tunnel(hostname):

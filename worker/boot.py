@@ -24,21 +24,21 @@ logger = log.setup_logger("boot")
 def deferred_init():
     """延迟初始化：数据恢复 → 系统配置 → 进程恢复 → MCP → Leader → 后台循环"""
     t0 = time.time()
-    logger.info("[boot] === 阶段2：延迟初始化 ===")
+    logger.info("=== 阶段2：延迟初始化 ===")
 
     # 1. 数据恢复
     try:
         state.load_status = persistence.load_or_create(state.inst_cfg)
-        logger.info(f"[boot] 数据恢复完成 ({time.time()-t0:.1f}s)")
+        logger.info(f"数据恢复完成 ({time.time()-t0:.1f}s)")
         persistence.save_prev_backup(state.inst_cfg)
     except Exception as e:
-        logger.error(f"[boot] 数据恢复失败: {e}")
+        logger.error(f"数据恢复失败: {e}")
 
     # 2. 系统配置
     try:
         syscfg.restore_system_config()
     except Exception as e:
-        logger.error(f"[boot] 系统配置恢复失败: {e}")
+        logger.error(f"系统配置恢复失败: {e}")
     threading.Thread(target=_system_trim, daemon=True).start()
     _tune_network()
     threading.Thread(target=_sysbackup_loop_async, daemon=True).start()
@@ -47,28 +47,32 @@ def deferred_init():
     try:
         _write_shell_profile()
     except Exception as e:
-        logger.error(f"[boot] Shell 配置失败: {e}")
+        logger.error(f"Shell 配置失败: {e}")
     try:
         _run_setup()
     except Exception as e:
-        logger.error(f"[boot] setup.sh 失败: {e}")
+        logger.error(f"setup.sh 失败: {e}")
 
     # 4. 进程持久化恢复
     if state.proc_mgr:
         try:
             restored, failed = state.proc_mgr.restore_all()
-            logger.info(f"[boot] 进程恢复 {restored} 成功, {failed} 失败 ({time.time()-t0:.1f}s)")
+            logger.info(f"进程恢复 {restored} 成功, {failed} 失败 ({time.time()-t0:.1f}s)")
             state.proc_mgr.snapshot(reason="post_restore")
             state.proc_mgr.start_monitor()
         except Exception as e:
-            logger.error(f"[boot] 进程恢复异常: {e}")
+            logger.error(f"进程恢复异常: {e}")
 
-    # 5. MCP 服务
-    try:
-        state.mcp_mgr = McpManager(state.inst_cfg)
-        state.mcp_mgr.start()
-    except Exception as e:
-        logger.error(f"[boot] MCP 启动失败: {e}")
+    # 5. MCP 服务（检查 mcp_enabled 配置）
+    mcp_enabled = state.inst_cfg.raw.get("mcp_enabled", True) if state.inst_cfg and state.inst_cfg.raw else True
+    if mcp_enabled:
+        try:
+            state.mcp_mgr = McpManager(state.inst_cfg)
+            state.mcp_mgr.start()
+        except Exception as e:
+            logger.error(f"MCP 启动失败: {e}")
+    else:
+        logger.info("MCP 服务未启用（mcp_enabled=false）")
 
     # 6. Leader 锁
     try:
@@ -80,20 +84,20 @@ def deferred_init():
         else:
             # acquire 失败（有别的活跃 leader），启动 follower_loop 等待升级
             def _on_promote():
-                logger.info("[boot] Follower 升级为 Leader，启动备份循环")
+                logger.info("Follower 升级为 Leader，启动备份循环")
                 from worker.loops import _backup_loop
                 threading.Thread(target=_backup_loop, daemon=True).start()
             threading.Thread(target=state.leader.follower_loop,
                              args=(_on_promote,), daemon=True).start()
     except Exception as e:
-        logger.error(f"[boot] Leader 锁失败: {e}")
+        logger.error(f"Leader 锁失败: {e}")
 
     # 7. 后台循环
     start_loops()
     terminal.start_cleanup()
 
-    logger.info(f"[boot] === 全部初始化完成 ({time.time()-t0:.1f}s) ===")
-    logger.info(f"[boot] 固定域名: {state.inst_cfg.tunnel_host}")
+    logger.info(f"=== 全部初始化完成 ({time.time()-t0:.1f}s) ===")
+    logger.info(f"固定域名: {state.inst_cfg.tunnel_host}")
 
 
 def _tune_network():
@@ -109,8 +113,8 @@ def _tune_network():
         try:
             subprocess.run(c, shell=True, timeout=5)
         except Exception as e:
-            logger.debug(f"[boot] 操作失败: {e}")
-    logger.info("[tune] 网络参数已优化")
+            logger.debug(f"操作失败: {e}")
+    logger.info("网络参数已优化")
 
 
 def _system_trim():
@@ -124,8 +128,8 @@ def _system_trim():
             subprocess.run(f"sudo systemctl stop {svc} 2>/dev/null", shell=True, timeout=10)
             subprocess.run(f"sudo systemctl disable {svc} 2>/dev/null", shell=True, timeout=10)
         except Exception as e:
-            logger.debug(f"[boot] 操作失败: {e}")
-    logger.info("[trim] 系统瘦身完成")
+            logger.debug(f"操作失败: {e}")
+    logger.info("系统瘦身完成")
 
 
 def _write_shell_profile():
@@ -152,21 +156,21 @@ def _write_shell_profile():
         subprocess.run("sudo hostname ghbox 2>/dev/null || hostname ghbox 2>/dev/null",
                        shell=True, timeout=5)
     except Exception as e:
-        logger.error(f"[shell] 配置失败: {e}")
+        logger.error(f"配置失败: {e}")
 
 
 def _run_setup():
     setup = os.path.join(config.FILES_DIR, "setup.sh")
     if not os.path.exists(setup):
         return
-    logger.info("[setup] 执行 setup.sh...")
+    logger.info("执行 setup.sh...")
     try:
         subprocess.Popen(["bash", setup],
                          stdout=open("/tmp/setup.log", "w"),
                          stderr=subprocess.STDOUT,
                          start_new_session=True)
     except Exception as e:
-        logger.error(f"[setup] 失败: {e}")
+        logger.error(f"失败: {e}")
 
 
 def _sysbackup_loop_async():
@@ -176,4 +180,4 @@ def _sysbackup_loop_async():
         try:
             syscfg.backup_system_config()
         except Exception as e:
-            logger.error(f"[sysbackup] 失败: {e}")
+            logger.error(f"失败: {e}")

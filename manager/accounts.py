@@ -84,10 +84,10 @@ def sync_fork(account):
         status, d = ghapi.gh_request("POST", url, token=token, data={"branch": "main"})
         ok = status in (200, 201)
         if not ok:
-            logger.info(f"[sync] {repo} 同步状态: {status}")
+            logger.info(f"{repo} 同步状态: {status}")
         return ok
     except Exception as e:
-        logger.error(f"[sync] 同步失败: {e}")
+        logger.error(f"同步失败: {e}")
         return False
 
 
@@ -115,7 +115,7 @@ def _set_repo_secret(account_token, repo, secret_name, secret_value):
             data={"encrypted_value": encrypted_b64, "key_id": d["key_id"]})
         return status in (200, 201, 204)
     except Exception as e:
-        logger.error(f"[secrets] 配置 {secret_name} 失败: {e}")
+        logger.error(f"配置 {secret_name} 失败: {e}")
         return False
 
 
@@ -126,13 +126,13 @@ def auto_provision_account(name, account_token, repo=None, max_conc=None):
     if status != 200:
         return {"ok": False, "error": f"token 无效（{status}）"}
     login = user.get("login", "")
-    logger.info(f"[account] 配置账号 {name} ({login})")
+    logger.info(f"配置账号 {name} ({login})")
     # ② 确保仓库
     if not repo:
         repo = f"{login}/{config.MAIN_REPO.split('/')[-1]}"
     status, _ = ghapi.gh_request("GET", f"{ghapi.API_BASE}/repos/{repo}", token=account_token)
     if status != 200:
-        logger.info("[account] fork 主仓库...")
+        logger.info("fork 主仓库...")
         ghapi.gh_request("POST", f"{ghapi.API_BASE}/repos/{config.MAIN_REPO}/forks",
                          token=account_token, data={"default_branch_only": True})
         for _ in range(60):
@@ -158,7 +158,7 @@ def auto_provision_account(name, account_token, repo=None, max_conc=None):
     for sname, sval in needed.items():
         if sval:
             _set_repo_secret(account_token, repo, sname, sval)
-    logger.info(f"[account] {name} secrets 配置完成")
+    logger.info(f"{name} secrets 配置完成")
     # ⑤ 报备
     return add_account(name, account_token, repo=repo, max_conc=max_conc)
 

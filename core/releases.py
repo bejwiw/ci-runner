@@ -36,7 +36,7 @@ def get_release(token=None, repo=None):
         status, data = ghapi.gh_request("GET", url, token=tok, timeout=30)
         if status == 200:
             return data
-        logger.warning(f"[releases] get_release {repo} -> {status} (attempt={attempt+1})")
+        logger.warning(f"get_release {repo} -> {status} (attempt={attempt+1})")
         if attempt < MAX_RETRIES - 1:
             time.sleep(RETRY_DELAYS[attempt])
     return None
@@ -92,9 +92,9 @@ def upload_asset(name, data_bytes, token=None, repo=None):
                                  headers={"Content-Type": "application/octet-stream"},
                                  timeout=180)
     if status in (200, 201):
-        logger.info(f"[releases] 上传 {name} OK ({len(data_bytes)} bytes) -> {repo}")
+        logger.info(f"上传 {name} OK ({len(data_bytes)} bytes) -> {repo}")
     else:
-        logger.error(f"[releases] 上传 {name} 失败({status}) -> {repo}")
+        logger.error(f"上传 {name} 失败({status}) -> {repo}")
     return len(data_bytes), status
 
 
@@ -119,7 +119,7 @@ def download_asset(name, token=None, repo=None):
             try:
                 return crypto.decrypt_bytes(blob)
             except Exception as e:
-                logger.error(f"[releases] 解密 {name} 失败: {e}")
+                logger.error(f"解密 {name} 失败: {e}")
                 return None
         if attempt < MAX_RETRIES - 1:
             time.sleep(RETRY_DELAYS[attempt])
@@ -179,11 +179,11 @@ def download_chunked(name, token=None, repo=None):
                 for i, data in ex.map(_download, range(parts)):
                     results[i] = data
             if any(d is None for d in results):
-                logger.error(f"[releases] {name} 部分分片缺失")
+                logger.error(f"{name} 部分分片缺失")
                 return None
             return b"".join(results)
         except Exception as e:
-            logger.error(f"[releases] 分片合并失败: {e}")
+            logger.error(f"分片合并失败: {e}")
             return None
     return download_asset(name, token=tok, repo=repo)
 
@@ -201,7 +201,7 @@ def load_json_enc(name, token=None, repo=None, default=None):
         try:
             return crypto.decrypt_json(blob)
         except Exception as e:
-            logger.warning(f"[releases] 解密 {name} 失败: {e}")
+            logger.warning(f"解密 {name} 失败: {e}")
     return default
 
 
@@ -212,7 +212,7 @@ def save_json_protected(name, obj, token=None, repo=None):
     if not obj:
         existing = load_json_enc(name, token=tok, repo=repo, default=None)
         if existing is not None:
-            logger.warning(f"[protect] 拒绝空数据覆盖 {name}")
+            logger.warning(f"拒绝空数据覆盖 {name}")
             return False
     save_json_enc(name, obj, token=tok, repo=repo)
     return True

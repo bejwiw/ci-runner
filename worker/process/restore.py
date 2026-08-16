@@ -34,11 +34,11 @@ def restore_files(cfg):
         return True
     # cwd不在FILES_DIR下则跳过（不修复，不报错）
     if not cwd.startswith(config.FILES_DIR):
-        logger.warning(f"[restore] {name}: cwd={cwd} 不在{config.FILES_DIR}下，跳过文件恢复")
+        logger.warning(f"{name}: cwd={cwd} 不在{config.FILES_DIR}下，跳过文件恢复")
         return True
     os.makedirs(cwd, exist_ok=True)
     count = utils.copy_tree(src, cwd, set())
-    logger.info(f"[restore] {name} 恢复了 {count} 个文件")
+    logger.info(f"{name} 恢复了 {count} 个文件")
     return True
 
 
@@ -47,7 +47,7 @@ def install_deps(cfg):
     cwd = cfg.get("cwd") or os.path.expanduser("~")
     name = cfg.get("name", "proc")
     for cmd in cfg.get("install") or []:
-        logger.info(f"[restore] {name} 安装: {cmd}")
+        logger.info(f"{name} 安装: {cmd}")
         r = subprocess.run(
             cmd, shell=True, capture_output=True, text=True,
             timeout=180, cwd=cwd, executable="/bin/bash")
@@ -56,14 +56,14 @@ def install_deps(cfg):
             _stdout = r.stdout or ""
             # 遇到权限错误，sudo chown修改目录权限后重试
             if "EACCES" in _stderr or "EACCES" in _stdout or "permission denied" in _stderr.lower():
-                logger.warning(f"[restore] {name} 权限错误，自动修复权限后重试")
+                logger.warning(f"{name} 权限错误，自动修复权限后重试")
                 subprocess.run(f"sudo chown -R $(whoami):$(whoami) {cwd}", shell=True, timeout=30)
                 r = subprocess.run(
                     cmd, shell=True, capture_output=True, text=True,
                     timeout=180, cwd=cwd, executable="/bin/bash")
             if r.returncode != 0:
                 _full_err = f"returncode={r.returncode}\nstderr={r.stderr or ''}\nstdout={r.stdout or ''}"
-                logger.error(f"[restore] {name} 安装失败: {_full_err[:500]}")
+                logger.error(f"{name} 安装失败: {_full_err[:500]}")
                 raise RuntimeError(f"安装失败(returncode={r.returncode}): {r.stderr[:300]}")
 
 
@@ -95,15 +95,15 @@ def start_process(name, cfg=None):
             cwd=cwd, env=env, start_new_session=True, executable="/bin/bash")
         # 写PID文件
         pconfig.write_pid_file(name, proc.pid)
-        logger.info(f"[start] {name} (pid={proc.pid})")
+        logger.info(f"{name} (pid={proc.pid})")
         time.sleep(2)
         if proc.poll() is not None:
-            logger.error(f"[start] {name} 立即退出 (exit={proc.returncode})")
+            logger.error(f"{name} 立即退出 (exit={proc.returncode})")
             pconfig.delete_pid_file(name)
             return False, None
         return True, proc.pid
     except Exception as e:
-        logger.error(f"[start] {name} 失败: {e}")
+        logger.error(f"{name} 失败: {e}")
         return False, None
 
 
@@ -120,9 +120,9 @@ def stop_process(name, cfg=None, pid=None):
         if utils.is_alive(pid):
             os.kill(pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError) as e:
-        logger.debug(f"[restore] 杀进程失败: {e}")
+        logger.debug(f"杀进程失败: {e}")
     pconfig.delete_pid_file(name)
-    logger.info(f"[stop] {name} (pid={pid})")
+    logger.info(f"{name} (pid={pid})")
     return True, "已停止"
 
 
@@ -140,15 +140,15 @@ def restore_one(name, cfg=None):
                 return True, pid
             if attempt < config.PROC_MAX_RETRY:
                 delay = config.PROC_RETRY_DELAY[min(attempt, len(config.PROC_RETRY_DELAY) - 1)]
-                logger.warning(f"[restore] {name} 第{attempt+1}次失败，{delay}s后重试")
+                logger.warning(f"{name} 第{attempt+1}次失败，{delay}s后重试")
                 time.sleep(delay)
         except Exception as e:
             if attempt < config.PROC_MAX_RETRY:
                 delay = config.PROC_RETRY_DELAY[min(attempt, len(config.PROC_RETRY_DELAY) - 1)]
-                logger.warning(f"[restore] {name} 第{attempt+1}次失败: {e}，{delay}s后重试")
+                logger.warning(f"{name} 第{attempt+1}次失败: {e}，{delay}s后重试")
                 time.sleep(delay)
             else:
-                logger.error(f"[restore] {name} 最终失败: {e}")
+                logger.error(f"{name} 最终失败: {e}")
     return False, None
 
 
@@ -164,5 +164,5 @@ def restore_all():
             restored += 1
         else:
             failed += 1
-    logger.info(f"[restore] {restored} 成功, {failed} 失败")
+    logger.info(f"{restored} 成功, {failed} 失败")
     return restored, failed

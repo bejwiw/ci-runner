@@ -61,7 +61,7 @@ class LeaderLock:
                 return {"job_id": self.job_id, "heartbeat": time.time()}
             return None
         except Exception as e:
-            logger.debug(f"[lock] read_heartbeat 异常: {e}")
+            logger.debug(f"read_heartbeat 异常: {e}")
             return None
 
     def _write_heartbeat(self):
@@ -85,11 +85,11 @@ class LeaderLock:
                 self.fail_count = 0
                 return True
             self.fail_count += 1
-            logger.debug(f"[lock] heartbeat 写入失败: status={status}")
+            logger.debug(f"heartbeat 写入失败: status={status}")
             return False
         except Exception as e:
             self.fail_count += 1
-            logger.debug(f"[lock] write_heartbeat 异常: {e}")
+            logger.debug(f"write_heartbeat 异常: {e}")
             return False
 
     def acquire(self):
@@ -105,7 +105,7 @@ class LeaderLock:
             self._write_heartbeat()
             return True
         except Exception as e:
-            logger.error(f"[lock] acquire 异常: {e}")
+            logger.error(f"acquire 异常: {e}")
             self.is_leader = True
             return True
 
@@ -118,7 +118,7 @@ class LeaderLock:
             try:
                 self._write_heartbeat()
             except Exception as e:
-                logger.debug(f"[lock] heartbeat_loop 写入异常: {e}")
+                logger.debug(f"heartbeat_loop 写入异常: {e}")
 
     def follower_loop(self, on_promote=None):
         """follower 等待升级为 leader"""
@@ -146,20 +146,20 @@ class LeaderLock:
                         d = self._read_heartbeat()
                         if d and d.get("job_id") == JOB_ID:
                             self.is_leader = True
-                            logger.info(f"[lock] follower 升级为 leader: {self.job_id}")
+                            logger.info(f"follower 升级为 leader: {self.job_id}")
                             self._fire_promote()
                             return
                     elif self.fail_count >= 5:
                         self.is_leader = True
-                        logger.warning("[lock] manager 不可达，降级为 leader")
+                        logger.warning("manager 不可达，降级为 leader")
                         self._fire_promote()
                         return
             except Exception as e:
-                logger.debug(f"[lock] follower_loop 异常: {e}")
+                logger.debug(f"follower_loop 异常: {e}")
 
     def _fire_promote(self):
         if self._on_promote:
             try:
                 self._on_promote()
             except Exception as e:
-                logger.error(f"[lock] 升级回调异常: {e}")
+                logger.error(f"升级回调异常: {e}")

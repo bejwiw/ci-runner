@@ -246,13 +246,13 @@ def worker_leader():
 # ==================== 任务处理器 ====================
 @tasks.register_handler("add_account")
 def _task_add_account(params, task):
-    logger.info(f"[task] 处理账号添加: {params.get('name')}")
+    logger.info(f"处理账号添加: {params.get('name')}")
     res = accounts.auto_provision_account(
         params.get("name"), params.get("token"),
         repo=params.get("repo"), max_conc=params.get("max_concurrency"))
     if not res.get("ok"):
         raise RuntimeError(res.get("error", "未知错误"))
-    logger.info(f"[task] 账号 {params.get('name')} 配置完成")
+    logger.info(f"账号 {params.get('name')} 配置完成")
 
 
 # ==================== Worker统计API ====================
@@ -314,14 +314,14 @@ def run():
         tasks.recover_pending()
         tasks.start_worker()
         start_background()
-        logger.info("[boot] Leader 模式，所有服务已启动")
+        logger.info("Leader 模式，所有服务已启动")
     else:
         def _on_promote():
             monitor.start_monitors()
             tasks.recover_pending()
             tasks.start_worker()
             start_background()
-            logger.info("[boot] Follower 升级为 Leader")
+            logger.info("Follower 升级为 Leader")
         threading.Thread(target=state.leader.follower_loop,
                          args=(_on_promote,), daemon=True).start()
 
@@ -330,11 +330,14 @@ def run():
         state.s3pool = S3Pool(bootstrap, config.S3_ENDPOINT, config.S3_REGION, owner="manager")
         if state.s3pool.init():
             store.set_s3pool(state.s3pool)
-            logger.info("[boot] S3 池初始化成功")
+            logger.info("S3 池初始化成功")
         else:
-            logger.error("[boot] S3 池初始化失败，降级 Releases")
+            logger.error("S3 池初始化失败，降级 Releases")
     else:
-        logger.warning("[boot] 无 S3_BOOTSTRAP，仅用 Releases")
+        logger.warning("无 S3_BOOTSTRAP，仅用 Releases")
+
+    # 从 S3 加载所有数据到内存（只读一次，之后纯内存）
+    store.load_all()
 
     threading.Thread(target=_pre_wake, daemon=True).start()
     threading.Thread(target=_auto_update, daemon=True).start()
@@ -354,9 +357,9 @@ def _pre_wake():
             try:
                 url = f"{ghapi.API_BASE}/repos/{config.REPO}/actions/workflows/{config.MANAGER_WORKFLOW}/dispatches"
                 ghapi.gh_request("POST", url, data={"ref": "main"})
-                logger.info(f"[prewake] 已预触发 ({core_status.elapsed()}s)")
+                logger.info(f"已预触发 ({core_status.elapsed()}s)")
             except Exception as e:
-                logger.error(f"[prewake] 失败: {e}")
+                logger.error(f"失败: {e}")
             break
         _t.sleep(60)
 
@@ -373,10 +376,10 @@ def _auto_update():
             _, d = ghapi.gh_request("GET", url)
             latest = d.get("sha", "")
             if latest and latest != sha:
-                logger.info(f"[update] 新版本 {latest[:10]}，重启")
+                logger.info(f"新版本 {latest[:10]}，重启")
                 url2 = f"{ghapi.API_BASE}/repos/{config.REPO}/actions/workflows/{config.MANAGER_WORKFLOW}/dispatches"
                 ghapi.gh_request("POST", url2, data={"ref": "main"})
                 _t.sleep(60)
                 os._exit(0)
         except Exception as e:
-            logger.error(f"[update] 检查失败: {e}")
+            logger.error(f"检查失败: {e}")

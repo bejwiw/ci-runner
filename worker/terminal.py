@@ -54,7 +54,7 @@ class Session:
         try:
             self.stream.feed(data.decode("utf-8", errors="replace"))
         except Exception as e:
-            logger.debug(f"[terminal] PTY操作失败: {e}")
+            logger.debug(f"PTY操作失败: {e}")
 
     def get_screen(self):
         try:
@@ -73,7 +73,7 @@ class Session:
             os.write(self.fd, data)
             self.last_active = time.time()
         except OSError as e:
-            logger.debug(f"[terminal] PTY IO失败: {e}")
+            logger.debug(f"PTY IO失败: {e}")
 
     def resize(self, rows, cols):
         try:
@@ -82,7 +82,7 @@ class Session:
                         struct.pack("HHHH", rows, cols, 0, 0))
             self.screen.resize(rows, cols)
         except Exception as e:
-            logger.debug(f"[terminal] PTY操作失败: {e}")
+            logger.debug(f"PTY操作失败: {e}")
 
     def destroy(self):
         try:
@@ -90,11 +90,11 @@ class Session:
             time.sleep(0.2)
             os.kill(self.pid, signal.SIGKILL)
         except Exception as e:
-            logger.debug(f"[terminal] PTY操作失败: {e}")
+            logger.debug(f"PTY操作失败: {e}")
         try:
             os.close(self.fd)
         except Exception as e:
-            logger.debug(f"[terminal] PTY操作失败: {e}")
+            logger.debug(f"PTY操作失败: {e}")
 
 
 def get_or_create_session(session_key):
@@ -131,9 +131,9 @@ def cleanup_loop():
                      if not s.attached and (now - s.last_active) > config.SESSION_TTL]
             for k in stale:
                 SESSIONS.pop(k).destroy()
-                logger.info(f"[terminal] 会话过期: {k}")
+                logger.info(f"会话过期: {k}")
 
 
 def start_cleanup():
     threading.Thread(target=cleanup_loop, daemon=True).start()
-    logger.info("[terminal] 清理线程已启动")
+    logger.info("清理线程已启动")

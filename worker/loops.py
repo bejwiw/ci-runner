@@ -31,7 +31,7 @@ def start_loops():
     threading.Thread(target=_worker_pre_wake, daemon=True).start()
     threading.Thread(target=_auto_update_loop, daemon=True).start()
     threading.Thread(target=_disk_monitor_loop, daemon=True).start()
-    logger.info("[loops] 后台循环已启动")
+    logger.info("后台循环已启动")
 
 
 def _backup_loop():
@@ -62,7 +62,7 @@ def _backup_loop():
                 f"auto: db={db_size}B files={_files_mb}MB", _da, _db)
         except Exception as e:
             persistence.record_backup("failed", 0, str(e), 0, 0)
-            logger.error(f"[backup] 失败: {e}")
+            logger.error(f"失败: {e}")
 
 
 def _report_running():
@@ -70,7 +70,7 @@ def _report_running():
     mgr = config.MANAGER_HOST or "ghvps2.kekeke.cc.cd"
     while True:
         if state.shutting_down:
-            logger.info("[report] 关闭中，停止上报")
+            logger.info("关闭中，停止上报")
             return
         try:
             # 收集S3摘要 + pending
@@ -99,14 +99,14 @@ def _report_running():
                     procs = state.proc_mgr.list_processes()
                     proc_count = len(procs)
                 except Exception as e:
-                    logger.debug(f"[loops] S3摘要失败: {e}")
+                    logger.debug(f"S3摘要失败: {e}")
             # 收集磁盘
             disk_pct = 0
             try:
                 stats = log.get_resource_stats()
                 disk_pct = round(stats.get("disk_use_pct", 0), 1)
             except Exception as e:
-                logger.debug(f"[loops] 进程数统计失败: {e}")
+                logger.debug(f"进程数统计失败: {e}")
             url = f"https://{mgr}/api/instances/{config.INSTANCE_ID}/report"
             payload = json.dumps({
                 "token": config.EXEC_TOKEN,
@@ -123,7 +123,7 @@ def _report_running():
             from worker import persistence
             persistence.clear_pending()
         except Exception as e:
-            logger.warning(f"[report] 上报失败: {e}")
+            logger.warning(f"上报失败: {e}")
         time.sleep(60)
 
 
@@ -139,7 +139,7 @@ def _worker_pre_wake():
             # 修复：先从 S3 读，再从 Releases 读
             cfg = _load_inst_cfg()
             if cfg is None:
-                logger.info(f"[prewake] 实例 {config.INSTANCE_ID} 已关闭，不续命")
+                logger.info(f"实例 {config.INSTANCE_ID} 已关闭，不续命")
                 return
             try:
                 # 强制备份
@@ -152,19 +152,19 @@ def _worker_pre_wake():
                     _files_mb = round((res[0] if res else 0) / 1048576, 1)
                     persistence.record_backup("prewake", _size,
                         f"prewake: db={db_size}B files={_files_mb}MB", 0, 0)
-                    logger.info("[prewake] 强制备份完成")
+                    logger.info("强制备份完成")
                 except Exception as e:
                     persistence.record_backup("failed", 0, f"prewake: {e}", 0, 0)
-                    logger.error(f"[prewake] 备份失败: {e}")
+                    logger.error(f"备份失败: {e}")
                 # 触发下一个 worker
                 url = (f"{ghapi.API_BASE}/repos/{config.REPO}/actions/workflows/"
                        f"{config.WORKER_WORKFLOW}/dispatches")
                 ghapi.gh_request("POST", url,
                                  data={"ref": "main",
                                        "inputs": {"INSTANCE_ID": config.INSTANCE_ID}})
-                logger.info(f"[prewake] 已预触发 ({elapsed}s)")
+                logger.info(f"已预触发 ({elapsed}s)")
             except Exception as e:
-                logger.error(f"[prewake] 触发失败: {e}")
+                logger.error(f"触发失败: {e}")
             break
         time.sleep(60)
 
@@ -193,14 +193,14 @@ def _auto_update_loop():
             _, d = ghapi.gh_request("GET", url)
             latest = d.get("sha", "")
             if latest and latest != sha:
-                logger.info(f"[update] 新版本 {latest[:10]}，同步 fork + 重启")
+                logger.info(f"新版本 {latest[:10]}，同步 fork + 重启")
                 try:
                     url2 = f"{ghapi.API_BASE}/repos/{config.REPO}/git/refs/heads/main"
                     ghapi.gh_request("PATCH", url2, token=config.GH_TOKEN,
                                      data={"sha": latest, "force": True})
                     time.sleep(3)
                 except Exception as e:
-                    logger.error(f"[update] fork 同步失败: {e}")
+                    logger.error(f"fork 同步失败: {e}")
                 url3 = (f"{ghapi.API_BASE}/repos/{config.REPO}/actions/workflows/"
                         f"{config.WORKER_WORKFLOW}/dispatches")
                 status, _ = ghapi.gh_request("POST", url3,
@@ -209,9 +209,9 @@ def _auto_update_loop():
                     time.sleep(60)
                     os._exit(0)
                 else:
-                    logger.error(f"[update] 触发失败({status})，继续运行")
+                    logger.error(f"触发失败({status})，继续运行")
         except Exception as e:
-            logger.error(f"[update] 检查失败: {e}")
+            logger.error(f"检查失败: {e}")
 
 
 def _disk_monitor_loop():
@@ -224,7 +224,7 @@ def _disk_monitor_loop():
             stats = log.get_resource_stats()
             pct = stats.get("disk_use_pct", 0)
             if pct >= config.DISK_CLEAN_TRIGGER_PERCENT:
-                logger.warning(f"[disk] {pct}% 超阈值，清理")
+                logger.warning(f"{pct}% 超阈值，清理")
                 for d in ("/tmp", os.path.join(config.FILES_DIR, ".tmp")):
                     if os.path.isdir(d):
                         for item in os.listdir(d):
@@ -235,10 +235,10 @@ def _disk_monitor_loop():
                                 else:
                                     os.remove(p)
                             except Exception as e:
-                                logger.debug(f"[loops] 磁盘清理失败: {e}")
+                                logger.debug(f"磁盘清理失败: {e}")
                 stats2 = log.get_resource_stats()
-                logger.info(f"[disk] 清理后 {stats2.get('disk_use_pct', 0)}%")
+                logger.info(f"清理后 {stats2.get('disk_use_pct', 0)}%")
             elif pct >= config.DISK_WARN_PERCENT:
-                logger.warning(f"[disk] {pct}%，注意空间")
+                logger.warning(f"{pct}%，注意空间")
         except Exception as e:
-            logger.error(f"[disk] 监控异常: {e}")
+            logger.error(f"监控异常: {e}")

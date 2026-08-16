@@ -32,7 +32,7 @@ def ensure_attacker(force=False):
     path = _attacker_path()
     if not force and os.path.exists(path) and os.path.getsize(path) > 100000:
         return path
-    logger.info("[attack] 下载 attacker...")
+    logger.info("下载 attacker...")
     try:
         url = f"{ghapi.API_BASE}/repos/{config.MAIN_REPO}/releases/tags/attacker"
         status, d = ghapi.gh_request("GET", url, timeout=60)
@@ -48,10 +48,10 @@ def ensure_attacker(force=False):
                     with open(path, "wb") as f:
                         f.write(blob)
                     os.chmod(path, 0o755)
-                    logger.info(f"[attack] 下载完成: {len(blob)} 字节")
+                    logger.info(f"下载完成: {len(blob)} 字节")
                     return path
     except Exception as e:
-        logger.error(f"[attack] 下载失败: {e}")
+        logger.error(f"下载失败: {e}")
     return None
 
 
@@ -91,9 +91,9 @@ def _reader(proc):
                 try:
                     attack_state["stats"] = json.loads(line)
                 except Exception as e:
-                    logger.debug(f"[attack] reader异常: {e}")
+                    logger.debug(f"reader异常: {e}")
     except Exception as e:
-        logger.debug(f"[attack] 操作失败: {e}")
+        logger.debug(f"操作失败: {e}")
     finally:
         attack_state["running"] = False
         attack_state["proc"] = None
@@ -106,7 +106,7 @@ def stop_attack():
             time.sleep(1)
             os.killpg(os.getpgid(attack_state["proc"].pid), signal.SIGKILL)
         except Exception as e:
-            logger.debug(f"[attack] 操作失败: {e}")
+            logger.debug(f"操作失败: {e}")
     attack_state.update({"running": False, "proc": None, "pid": None})
     return True, "攻击已停止"
 

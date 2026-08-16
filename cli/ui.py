@@ -126,6 +126,8 @@ def instance_menu():
             ops.logs_follow()
         elif choice in ("e", "E"):
             ops.exec_batch()
+        elif choice in ("f", "F"):
+            ops.toggle_mcp()
         elif choice == "0" or choice is None:
             break
 

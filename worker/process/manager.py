@@ -47,7 +47,7 @@ class ProcessManager:
         try:
             self._upload_snapshot()
         except Exception as e:
-            logger.error(f"[process] 快照上传失败: {e}")
+            logger.error(f"快照上传失败: {e}")
         return saved
 
     def _upload_snapshot(self):
@@ -64,19 +64,19 @@ class ProcessManager:
         if self.s3pool and self.s3pool.is_ready():
             try:
                 self.s3pool.put_file(key, tmp)
-                logger.info(f"[process] 快照已存入 S3 ({file_size} 字节)")
+                logger.info(f"快照已存入 S3 ({file_size} 字节)")
             except Exception as e:
-                logger.warning(f"[process] S3 快照失败: {e}")
+                logger.warning(f"S3 快照失败: {e}")
         if file_size < 50 * 1024 * 1024:
             with open(tmp, "rb") as f:
                 data = f.read()
             asset = f"inst-{inst_id}.processes.tar.gz.enc"
             releases.upload_chunked(asset, data)
-            logger.info(f"[process] 快照已存入 Releases ({file_size} 字节)")
+            logger.info(f"快照已存入 Releases ({file_size} 字节)")
         try:
             os.remove(tmp)
         except Exception as e:
-            logger.debug(f"[process] 操作失败: {e}")
+            logger.debug(f"操作失败: {e}")
 
     def _download_snapshot(self):
         """下载进程快照。S3 分片优先，Releases 降级。"""
@@ -91,17 +91,17 @@ class ProcessManager:
             try:
                 _psize = self.s3pool.get_storage_size(key)
                 if _psize > 0:
-                    logger.info(f"[process] 要恢复快照: {_psize/1048576:.1f}MB")
+                    logger.info(f"要恢复快照: {_psize/1048576:.1f}MB")
                 if self.s3pool.get_to_file(key, tmp):
                     pbackup.unpack_processes_from_file(tmp)
-                    logger.info(f"[process] 快照从 S3 恢复")
+                    logger.info(f"快照从 S3 恢复")
                     try:
                         os.remove(tmp)
                     except Exception as e:
-                        logger.debug(f"[process] 上传快照失败: {e}")
+                        logger.debug(f"上传快照失败: {e}")
                     return
             except Exception as e:
-                logger.warning(f"[process] S3 快照下载失败: {e}")
+                logger.warning(f"S3 快照下载失败: {e}")
         asset = f"inst-{inst_id}.processes.tar.gz.enc"
         data = releases.download_chunked(asset)
         if data:
@@ -111,21 +111,21 @@ class ProcessManager:
             try:
                 os.remove(tmp)
             except Exception as e:
-                logger.debug(f"[process] 清理异常: {e}")
-            logger.info(f"[process] 快照从 Releases 恢复")
+                logger.debug(f"清理异常: {e}")
+            logger.info(f"快照从 Releases 恢复")
 
     def final_snapshot(self):
-        logger.info("[process] 最终快照")
+        logger.info("最终快照")
         try:
             self.snapshot(reason="final")
         except Exception as e:
-            logger.error(f"[process] 最终快照失败: {e}")
+            logger.error(f"最终快照失败: {e}")
 
     def restore_all(self):
         try:
             self._download_snapshot()
         except Exception as e:
-            logger.warning(f"[process] 快照下载失败: {e}")
+            logger.warning(f"快照下载失败: {e}")
         restored, failed = prestore.restore_all()
         # 从scan_configs()填充known字典 + 启动隧道
         configs = pconfig.scan_configs()
@@ -215,7 +215,7 @@ class ProcessManager:
                 self._recover_crashed()
                 self._check_tunnels()
             except Exception as e:
-                logger.error(f"[process] 监控异常: {e}")
+                logger.error(f"监控异常: {e}")
             self._stop.wait(config.PROC_SCAN_INTERVAL)
 
     def _recover_crashed(self):
@@ -230,14 +230,14 @@ class ProcessManager:
                     continue
                 pid = entry.get("pid")
             if pid and not utils.is_alive(pid):
-                logger.warning(f"[restore] {name} 崩溃(pid={pid})，重启")
+                logger.warning(f"{name} 崩溃(pid={pid})，重启")
                 delay = cfg.get("restart_delay", 3)
                 time.sleep(delay)
                 self.start(name)
 
     def start_monitor(self):
         threading.Thread(target=self.monitor_loop, daemon=True).start()
-        logger.info("[process] 监控已启动")
+        logger.info("监控已启动")
 
     def _check_tunnels(self):
         """检查隧道崩溃并重启"""

@@ -48,7 +48,7 @@ def add_task(task_type, params, dedup_key=None):
                 if (t["type"] == task_type
                         and t.get("dedup_key") == dedup_key
                         and t["status"] in ("pending", "running")):
-                    logger.info(f"[task] 任务已存在，跳过: {t['id']}")
+                    logger.info(f"任务已存在，跳过: {t['id']}")
                     return t
         task = {
             "id": f"t-{int(time.time())}-{uuid.uuid4().hex[:6]}",
@@ -65,7 +65,7 @@ def add_task(task_type, params, dedup_key=None):
         tasks.append(task)
         _trim_history(tasks)
         save_tasks(tasks)
-        logger.info(f"[task] 添加任务 {task['id']} ({task_type})")
+        logger.info(f"添加任务 {task['id']} ({task_type})")
         return task
 
 
@@ -103,17 +103,17 @@ def _execute(task):
     try:
         handler(task["params"], task)
         update_task(task["id"], status="done", error="")
-        logger.info(f"[task] {task['id']} 完成")
+        logger.info(f"{task['id']} 完成")
     except Exception as e:
         retries += 1
         if retries <= MAX_RETRIES:
             delay = RETRY_DELAY[min(retries - 1, len(RETRY_DELAY) - 1)]
             update_task(task["id"], status="pending", retries=retries, error=str(e))
-            logger.warning(f"[task] {task['id']} 失败(第{retries}次): {e}，{delay}s后重试")
+            logger.warning(f"{task['id']} 失败(第{retries}次): {e}，{delay}s后重试")
             time.sleep(delay)
         else:
             update_task(task["id"], status="failed", retries=retries, error=str(e))
-            logger.error(f"[task] {task['id']} 最终失败: {e}")
+            logger.error(f"{task['id']} 最终失败: {e}")
 
 
 def _worker_loop():
@@ -125,19 +125,19 @@ def _worker_loop():
                 if (t["status"] == "running" and t.get("started_at")
                         and time.time() - t["started_at"] > TASK_TIMEOUT):
                     update_task(t["id"], status="failed", error="任务超时")
-                    logger.error(f"[task] {t['id']} 超时")
+                    logger.error(f"{t['id']} 超时")
             if pending:
                 _execute(pending[0])
             else:
                 time.sleep(2)
         except Exception as e:
-            logger.error(f"[task] 执行器异常: {e}")
+            logger.error(f"执行器异常: {e}")
             time.sleep(5)
 
 
 def start_worker():
     threading.Thread(target=_worker_loop, daemon=True).start()
-    logger.info("[task] 任务执行器已启动")
+    logger.info("任务执行器已启动")
 
 
 def recover_pending():
@@ -152,4 +152,4 @@ def recover_pending():
             changed = True
     if changed:
         save_tasks(tasks)
-        logger.info(f"[task] 已恢复未完成任务")
+        logger.info(f"已恢复未完成任务")

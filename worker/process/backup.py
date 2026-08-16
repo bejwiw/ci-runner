@@ -28,7 +28,7 @@ def _clear_dir(path):
             try:
                 os.remove(p)
             except Exception as e:
-                logger.debug(f"[backup] 复制文件失败: {e}")
+                logger.debug(f"复制文件失败: {e}")
 
 
 def backup_process_files(cfg):
@@ -72,7 +72,7 @@ def backup_process_files(cfg):
 
     size_mb = utils.dir_size_mb(tmp_dest)
     if size_mb > config.PROC_MAX_BACKUP_MB:
-        logger.warning(f"[backup] {name} 过大({size_mb:.1f}MB)，跳过")
+        logger.warning(f"{name} 过大({size_mb:.1f}MB)，跳过")
         shutil.rmtree(tmp_dest, ignore_errors=True)
         os.makedirs(dest, exist_ok=True)
         cfg["files_backed"] = False
@@ -89,7 +89,7 @@ def backup_process_files(cfg):
         cfg["files_backed"] = True
         cfg["files_count"] = count
         cfg["size_mb"] = round(size_mb, 2)
-        logger.info(f"[backup] {name}: {count} 文件, {size_mb:.1f}MB")
+        logger.info(f"{name}: {count} 文件, {size_mb:.1f}MB")
 
     from worker.process import tunnels
     tunnels.copy_tunnel_files(cfg, name, pconfig.proc_dir())
@@ -117,10 +117,10 @@ def unpack_processes_tar(data):
                 tar.extractall(path=config.FILES_DIR, filter="tar")
             except TypeError:
                 tar.extractall(path=config.FILES_DIR)
-        logger.info("[backup] 进程快照解包完成")
+        logger.info("进程快照解包完成")
         return True
     except Exception as e:
-        logger.error(f"[backup] 解包失败: {e}")
+        logger.error(f"解包失败: {e}")
         return False
 
 
@@ -142,7 +142,7 @@ def snapshot(reason="periodic"):
                 continue
             if name not in configs:
                 shutil.rmtree(os.path.join(proc_dir, name), ignore_errors=True)
-                logger.info(f"[snapshot] 清理残留: {name}")
+                logger.info(f"清理残留: {name}")
     saved = 0
     processes_meta = {}
     for name, cfg in configs.items():
@@ -152,7 +152,7 @@ def snapshot(reason="periodic"):
             if ok:
                 saved += 1
         except Exception as e:
-            logger.error(f"[snapshot] 备份 {name} 失败: {e}")
+            logger.error(f"备份 {name} 失败: {e}")
             ok = False
             size_mb = 0
         # 无论成功失败都加入 manifest（确保恢复时不遗漏）
@@ -168,7 +168,7 @@ def snapshot(reason="periodic"):
     # 验证 manifest 完整性：确保 scan_configs 的所有项目都在
     missing = set(configs.keys()) - set(processes_meta.keys())
     if missing:
-        logger.warning(f"[snapshot] manifest 缺失 {len(missing)} 个项目，补全: {missing}")
+        logger.warning(f"manifest 缺失 {len(missing)} 个项目，补全: {missing}")
         for name in missing:
             cfg = configs[name]
             processes_meta[name] = {
@@ -181,7 +181,7 @@ def snapshot(reason="periodic"):
                 "saved_at": cfg.get("saved_at"),
             }
     pconfig.save_manifest(processes_meta, reason=reason)
-    logger.info(f"[snapshot] {saved}/{len(configs)} 个进程持久化（{reason}）")
+    logger.info(f"{saved}/{len(configs)} 个进程持久化（{reason}）")
     return saved, processes_meta
 
 
@@ -207,8 +207,8 @@ def unpack_processes_from_file(file_path):
             subprocess.run(["sudo", "tar", "--zstd", "-xf", file_path, "-C", config.FILES_DIR], timeout=120)
         else:
             subprocess.run(["sudo", "tar", "xzf", file_path, "-C", config.FILES_DIR], timeout=120)
-        logger.info("[backup] 进程快照解包完成(磁盘)")
+        logger.info("进程快照解包完成(磁盘)")
         return True
     except Exception as e:
-        logger.error(f"[backup] 解包失败: {e}")
+        logger.error(f"解包失败: {e}")
         return False
