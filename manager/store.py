@@ -298,7 +298,122 @@ def delete_instance_config(inst_id):
     releases.delete_asset(f"inst-{inst_id}.json.enc")
 
 
-# ==================== Worker 统计（纯内存）====================
+def purge_instance_data(inst_id):
+    """彻底清理实例所有备份数据（S3 + Releases）
+
+    清理范围：
+    - S3: 数据库、文件备份、文件备份分片、进程快照（旧）、进程快照分片
+    - Releases: 加密数据库、加密文件备份、分片manifest、分片数据
+    处理大文件(>50MB S3分片 / >500MB Releases分片)的完整清理。
+    """
+    import json as _json
+
+    # ==================== S3 清理 ====================
+    if _s3pool and _s3pool.is_ready():
+        # 所有可能的key前缀
+        s3_prefixes = [
+            f"inst-data/{inst_id}",
+            f"inst-files/{inst_id}",
+            f"inst-proc/{inst_id}",
+        ]
+        for prefix in s3_prefixes:
+            # 可能的数据文件
+            data_keys = [
+                prefix,                    # 单文件版本（db / files.tar.gz / proc.tar.gz）
+                f"{prefix}.manifest",       # 分片清单
+                f"{prefix}.chunk0",        # 兜底：至少尝试chunk0
+            ]
+            # 1. 查manifest获取分片列表
+            manifest_data = None
+            try:
+                manifest_data = _s3pool.get(f"{prefix}.manifest")
+            except Exception:
+                pass
+
+            if manifest_data:
+                try:
+                    m = _json.loads(manifest_data)
+                    num_chunks = m.get("chunks", 0)
+                    locations = m.get("locations", [])
+                    # 2a. 按manifest的locations精确删除每个分片
+                    for loc in locations:
+                        chunk_idx = loc.get("chunk", 0)
+                        chunk_key = f"{prefix}.chunk{chunk_idx}"
+                        try:
+                            if _s3pool.delete(chunk_key):
+                                logger.info(f"S3 清理分片 {chunk_key}")
+                        except Exception as e:
+                            logger.warning(f"S3 清理 {chunk_key} 失败: {e}")
+                    # 2b. locations不完整时用num_chunks兜底
+                    if len(locations) < num_chunks:
+                        for i in range(num_chunks):
+                            chunk_key = f"{prefix}.chunk{i}"
+                            try:
+                                _s3pool.delete(chunk_key)
+                            except Exception:
+                                pass
+                    # 3. 删除manifest本身
+                    try:
+                        _s3pool.delete(f"{prefix}.manifest")
+                    except Exception as e:
+                        logger.warning(f"S3 清理 manifest 失败: {e}")
+                    logger.info(f"S3 分片清理 {prefix} ({num_chunks}块)")
+                except Exception as e:
+                    logger.warning(f"S3 解析manifest {prefix} 失败: {e}")
+
+            # 4. 删除单文件版本（覆盖写的最新数据或小文件）
+            for key in data_keys:
+                try:
+                    if _s3pool.delete(key):
+                        logger.info(f"S3 清理 {key}")
+                except Exception as e:
+                    logger.warning(f"S3 清理 {key} 失败: {e}")
+
+    # ==================== Releases 清理 ====================
+    # Releases的asset名格式: inst-{id}.xxx.enc
+    releases_assets = [
+        f"inst-{inst_id}.db.enc",
+        f"inst-{inst_id}.files.tar.gz.enc",
+        f"inst-{inst_id}.processes.tar.gz.enc",
+        f"inst-{inst_id}.json.enc",
+    ]
+
+    for asset_name in releases_assets:
+        # 1. 查分片manifest
+        manifest_blob = None
+        try:
+            manifest_blob = releases.download_asset(f"{asset_name}.manifest")
+        except Exception:
+            pass
+
+        if manifest_blob:
+            try:
+                m = _json.loads(manifest_blob.decode())
+                parts = m.get("parts", 0)
+                # 2. 逐个删除分片
+                for i in range(parts):
+                    try:
+                        releases.delete_asset(f"{asset_name}.part{i}")
+                    except Exception:
+                        pass
+                logger.info(f"Releases 分片清理 {asset_name} ({parts}片)")
+            except Exception as e:
+                logger.warning(f"Releases 解析manifest {asset_name} 失败: {e}")
+
+        # 3. 删除manifest本身
+        try:
+            releases.delete_asset(f"{asset_name}.manifest")
+        except Exception:
+            pass
+
+        # 4. 删除单文件版本
+        try:
+            releases.delete_asset(asset_name)
+        except Exception as e:
+            logger.warning(f"Releases 清理 {asset_name} 失败: {e}")
+
+    logger.info(f"实例 {inst_id} 备份数据已彻底清理 (S3+Releases)")
+
 def get_worker_stats(inst_id):
     """获取 worker 操作统计（纯内存，不读 S3）"""
     return _worker_stats.get(inst_id, {
