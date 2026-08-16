@@ -146,8 +146,16 @@ class S3Pool:
 
     def _do_refresh_storage_sizes(self):
         try:
-            all_indices = list(range(1, len(self._accounts) + 1))
-            sizes = self.query_bucket_sizes(account_indices=all_indices, concurrency=50)
+            # 只查 used_bytes > 0 的桶（自己 owner 写入过的桶），
+            # 避免把其他 owner 的数据算进本 owner 的计数器。
+            # 配合 load_state 恢复 used_bytes，能纠正旧虚高值。
+            with self._lock:
+                candidates = [idx for idx, c in self._counters.items()
+                              if idx > 0 and c.get("used_bytes", 0) > 0]
+            if not candidates:
+                logger.info("无 used_bytes>0 的桶，跳过刷新")
+                return
+            sizes = self.query_bucket_sizes(account_indices=candidates, concurrency=50)
             with self._lock:
                 corrected = 0
                 for idx, info in sizes.items():
