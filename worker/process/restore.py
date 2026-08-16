@@ -23,25 +23,6 @@ from worker.process import config as pconfig
 logger = log.setup_logger("proc.restore")
 
 
-def restore_files(cfg):
-    """从processes/<name>/app/复制文件回cwd"""
-    name = cfg.get("name", "proc")
-    if not cfg.get("files_backed", True):
-        return True
-    src = os.path.join(pconfig.proc_dir(), name, "app")
-    cwd = cfg.get("cwd") or ""
-    if not cwd or not os.path.isdir(src):
-        return True
-    # cwd不在FILES_DIR下则跳过（不修复，不报错）
-    if not cwd.startswith(config.FILES_DIR):
-        logger.warning(f"{name}: cwd={cwd} 不在{config.FILES_DIR}下，跳过文件恢复")
-        return True
-    os.makedirs(cwd, exist_ok=True)
-    count = utils.copy_tree(src, cwd, set())
-    logger.info(f"{name} 恢复了 {count} 个文件")
-    return True
-
-
 def install_deps(cfg):
     """执行依赖安装（直接执行，不用sudo。遇到权限错误自动sudo chown后重试）"""
     cwd = cfg.get("cwd") or os.path.expanduser("~")
@@ -65,6 +46,35 @@ def install_deps(cfg):
                 _full_err = f"returncode={r.returncode}\nstderr={r.stderr or ''}\nstdout={r.stdout or ''}"
                 logger.error(f"{name} 安装失败: {_full_err[:500]}")
                 raise RuntimeError(f"安装失败(returncode={r.returncode}): {r.stderr[:300]}")
+
+
+def _run_build(cfg):
+    """执行构建命令（恢复后、启动前）"""
+    name = cfg.get("name", "proc")
+    cwd = cfg.get("cwd") or os.path.expanduser("~")
+    for cmd in cfg.get("build") or []:
+        logger.info(f"{name} 构建: {cmd}")
+        import subprocess
+        r = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True,
+            timeout=300, cwd=cwd, executable="/bin/bash")
+        if r.returncode != 0:
+            _full = f"returncode={r.returncode}\nstderr={r.stderr or ''}\nstdout={r.stdout or ''}"
+            logger.error(f"{name} 构建失败: {_full[:500]}")
+            raise RuntimeError(f"构建失败(returncode={r.returncode}): {r.stderr[:300]}")
+    # 从文件读取环境变量（如 .env 文件）
+    env_file = cfg.get("env_file", "")
+    if env_file:
+        env_path = os.path.join(cwd, env_file)
+        if os.path.exists(env_path):
+            env = cfg.setdefault("env", {})
+            with open(env_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        env[k.strip()] = v.strip()
+            logger.info(f"{name} 加载环境变量: {env_path}")
 
 
 def start_process(name, cfg=None):
@@ -133,8 +143,8 @@ def restore_one(name, cfg=None):
         return False, None
     for attempt in range(config.PROC_MAX_RETRY + 1):
         try:
-            restore_files(cfg)
             install_deps(cfg)
+            _run_build(cfg)
             ok, pid = start_process(name, cfg)
             if ok:
                 return True, pid

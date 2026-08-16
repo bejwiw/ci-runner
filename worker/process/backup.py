@@ -98,12 +98,25 @@ def backup_process_files(cfg):
 
 
 def pack_processes_tar():
-    """打包 processes 目录为 gz 字节流（排除pid文件）"""
-    if not os.path.isdir(pconfig.proc_dir()):
+    """直接打包项目目录为 gz 字节流（不经过processes/中转，排除pid文件）"""
+    configs = pconfig.scan_configs()
+    if not configs:
         return None
+    tmp_dir = "/tmp/ghbox_snapshot"
+    if os.path.exists(tmp_dir):
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(tmp_dir)
+    for name, cfg in configs.items():
+        cwd = cfg.get("cwd") or ""
+        if not cwd or not os.path.isdir(cwd):
+            continue
+        exclude = set(cfg.get("exclude") or pconfig.DEFAULT_EXCLUDE)
+        dest = os.path.join(tmp_dir, name)
+        utils.copy_tree(cwd, dest, exclude)
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        tar.add(pconfig.proc_dir(), arcname="processes", filter=lambda info: None if info.name.endswith("/pid") or info.name.endswith("/pid/") else info)
+        tar.add(tmp_dir, arcname=".", filter=lambda info: None if info.name.endswith("/pid") or info.name.endswith("/pid/") else info)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
     return buf.getvalue()
 
 
@@ -125,75 +138,62 @@ def unpack_processes_tar(data):
 
 
 def snapshot(reason="periodic"):
-    """扫描ghvps.json，备份所有配置的进程（不扫描/proc）
+    """扫描ghvps.json，记录所有进程快照元数据
 
-    即使 backup_process_files 失败也加入 manifest（标记 files_backed=False），
-    确保恢复时 scan_configs 能扫到所有项目。
+    pack_processes_tar() 直接打包项目目录，不再经过processes/中转。
+    此函数只记录元数据（PID/命令/cwd/大小），不复制文件。
     """
     configs = pconfig.scan_configs()
     if not configs:
         return 0, {}
-    # 清理processes目录中的残留（项目已删除但快照还在）
-    import shutil
-    proc_dir = pconfig.proc_dir()
-    if os.path.isdir(proc_dir):
-        for name in os.listdir(proc_dir):
-            if name == "manifest.json":
-                continue
-            if name not in configs:
-                shutil.rmtree(os.path.join(proc_dir, name), ignore_errors=True)
-                logger.info(f"清理残留: {name}")
     saved = 0
     processes_meta = {}
     for name, cfg in configs.items():
         pid = pconfig.read_pid_file(name)
-        try:
-            ok, size_mb, cfg = backup_process_files(cfg)
-            if ok:
+        cwd = cfg.get("cwd") or ""
+        size_mb = 0
+        files_backed = False
+        if cwd and os.path.isdir(cwd):
+            size_mb = utils.dir_size_mb(cwd)
+            if size_mb <= config.PROC_MAX_BACKUP_MB:
+                files_backed = True
                 saved += 1
-        except Exception as e:
-            logger.error(f"备份 {name} 失败: {e}")
-            ok = False
-            size_mb = 0
-        # 无论成功失败都加入 manifest（确保恢复时不遗漏）
+            else:
+                logger.warning(f"{name} 过大({size_mb:.1f}MB)，跳过文件备份")
         processes_meta[name] = {
             "name": name,
             "pid": pid,
             "cmdline": cfg.get("command", ""),
-            "cwd": cfg.get("cwd", ""),
-            "size_mb": round(size_mb, 2) if size_mb else 0,
-            "files_backed": cfg.get("files_backed", ok),
+            "cwd": cwd,
+            "size_mb": round(size_mb, 2),
+            "files_backed": files_backed,
             "saved_at": cfg.get("saved_at"),
         }
-    # 验证 manifest 完整性：确保 scan_configs 的所有项目都在
-    missing = set(configs.keys()) - set(processes_meta.keys())
-    if missing:
-        logger.warning(f"manifest 缺失 {len(missing)} 个项目，补全: {missing}")
-        for name in missing:
-            cfg = configs[name]
-            processes_meta[name] = {
-                "name": name,
-                "pid": None,
-                "cmdline": cfg.get("command", ""),
-                "cwd": cfg.get("cwd", ""),
-                "size_mb": 0,
-                "files_backed": False,
-                "saved_at": cfg.get("saved_at"),
-            }
     pconfig.save_manifest(processes_meta, reason=reason)
-    logger.info(f"{saved}/{len(configs)} 个进程持久化（{reason}）")
+    logger.info(f"{saved}/{len(configs)} 个进程快照已记录（{reason}）")
     return saved, processes_meta
 
 
 def pack_processes_to_disk():
-    """打包processes目录到磁盘文件（zstd压缩，排除pid文件）"""
-    if not os.path.isdir(pconfig.proc_dir()):
+    """直接打包项目目录到磁盘文件（zstd压缩，排除pid文件）"""
+    configs = pconfig.scan_configs()
+    if not configs:
         return None
+    tmp_dir = "/tmp/ghbox_snapshot"
+    if os.path.exists(tmp_dir):
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(tmp_dir)
+    for name, cfg in configs.items():
+        cwd = cfg.get("cwd") or ""
+        if not cwd or not os.path.isdir(cwd):
+            continue
+        exclude = set(cfg.get("exclude") or pconfig.DEFAULT_EXCLUDE)
+        utils.copy_tree(cwd, os.path.join(tmp_dir, name), exclude)
     tmp = os.path.join("/tmp/ghbox_backup", "proc_backup.tar.zst")
     os.makedirs(os.path.dirname(tmp), exist_ok=True)
     import subprocess
-    subprocess.run(["sudo", "tar", "--zstd", "-cf", tmp, "-C", config.FILES_DIR,
-                     "--exclude=pid", "processes"], timeout=120)
+    subprocess.run(["tar", "--zstd", "-cf", tmp, "-C", tmp_dir, "."], timeout=120)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
     return tmp
 
 
