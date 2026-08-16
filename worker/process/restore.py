@@ -179,6 +179,24 @@ def restore_all():
             if os.path.isdir(src) and not os.path.isdir(dst):
                 try:
                     shutil.move(src, dst)
+                    # 旧格式：项目文件在 app/ 子目录里，需要移到根目录
+                    app_subdir = os.path.join(dst, "app")
+                    if os.path.isdir(app_subdir):
+                        for item in os.listdir(app_subdir):
+                            src_item = os.path.join(app_subdir, item)
+                            dst_item = os.path.join(dst, item)
+                            if not os.path.exists(dst_item):
+                                shutil.move(src_item, dst_item)
+                            elif os.path.isdir(src_item) and os.path.isdir(dst_item):
+                                for sub in os.listdir(src_item):
+                                    sub_src = os.path.join(src_item, sub)
+                                    sub_dst = os.path.join(dst_item, sub)
+                                    if not os.path.exists(sub_dst):
+                                        shutil.move(sub_src, sub_dst)
+                        try:
+                            os.rmdir(app_subdir)
+                        except OSError:
+                            pass
                     migrated += 1
                     logger.info(f"迁移旧格式项目: {name}")
                 except Exception as e:
