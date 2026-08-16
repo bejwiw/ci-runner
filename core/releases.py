@@ -195,13 +195,13 @@ def save_json_enc(name, obj, token=None, repo=None):
 
 
 def load_json_enc(name, token=None, repo=None, default=None):
-    """读取并解密 JSON 对象"""
+    """读取 JSON 对象（download_asset已解密，直接解析JSON）"""
     blob = download_asset(name, token=token, repo=repo)
     if blob:
         try:
-            return crypto.decrypt_json(blob)
+            return json.loads(blob.decode())
         except Exception as e:
-            logger.warning(f"解密 {name} 失败: {e}")
+            logger.warning(f"解析 {name} 失败: {e}")
     return default
 
 

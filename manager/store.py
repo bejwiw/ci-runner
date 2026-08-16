@@ -46,8 +46,13 @@ def _s3_get_json(key):
     return None
 
 def set_s3pool(pool):
-    global _s3pool
+    global _s3pool, _loaded
     _s3pool = pool
+    # S3 刚设置好，如果之前从 Releases 加载了空数据，重新从 S3 加载
+    if _loaded and not _instances and not _accounts:
+        _loaded = False
+        logger.info("[store] S3 就绪，重新加载（之前从 Releases 加载为空）")
+        load_all()
 
 
 # ==================== 启动加载（只读一次 S3）====================
