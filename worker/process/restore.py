@@ -163,7 +163,32 @@ def restore_one(name, cfg=None):
 
 
 def restore_all():
-    """从scan_configs()读取所有ghvps.json，恢复进程"""
+    """从S3快照恢复后，scan_configs扫描项目目录，恢复进程
+
+    兼容旧格式：如果解压后有processes/目录，将项目目录迁移到FILES_DIR
+    """
+    import shutil
+    proc_dir = pconfig.proc_dir()
+    if os.path.isdir(proc_dir):
+        migrated = 0
+        for name in os.listdir(proc_dir):
+            if name == "manifest.json":
+                continue
+            src = os.path.join(proc_dir, name)
+            dst = os.path.join(config.FILES_DIR, name)
+            if os.path.isdir(src) and not os.path.isdir(dst):
+                try:
+                    shutil.move(src, dst)
+                    migrated += 1
+                    logger.info(f"迁移旧格式项目: {name}")
+                except Exception as e:
+                    logger.warning(f"迁移 {name} 失败: {e}")
+        if migrated > 0:
+            try:
+                shutil.rmtree(proc_dir, ignore_errors=True)
+            except Exception:
+                pass
+            logger.info(f"旧格式迁移完成: {migrated} 个项目")
     configs = pconfig.scan_configs()
     if not configs:
         return 0, 0
