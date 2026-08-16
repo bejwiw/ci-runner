@@ -176,7 +176,11 @@ def create_instance():
             payload = {"account": accounts[int(sel)]["name"]}
         except (ValueError, IndexError):
             _warn("无效选择，使用自动选择")
-    console.print("\n  [cyan]正在创建新实例（隧道+MCP+启动）...[/]")
+    mcp_choice = _input("  是否启用 MCP？（默认是）: ")
+    if mcp_choice and mcp_choice.lower() in ("n", "no", "否"):
+        payload["mcp_enabled"] = False
+        console.print("  [dim]MCP 将不启用[/]")
+    console.print("\n  [cyan]正在创建新实例...[/]")
     d = _post("/api/instances", payload)
     ok, data = api.check(d)
     if ok:
@@ -693,6 +697,70 @@ def exec_batch():
             console.print(f"  [dim][exit={r.get('code', '?')}]")
         else:
             _err(d.get("error", r.get("error", str(d))))
+
+
+def instance_detail():
+    """实例详情（一键看实例全貌：健康+进程+资源+隧道）"""
+    inst = pick_instance()
+    if not inst:
+        return
+    host = inst["hostname"]
+    # 健康
+    h = _get_inst(host, "/api/health", msg="查健康")
+    ok, hdata = api.check(h)
+    elapsed = hdata.get("elapsed", 0) if ok else 0
+    console.print(Panel(
+        f"实例: {inst['id']}  域名: {host}\n"
+        f"状态: {'\u2705' if ok else '\u274c'}  运行: {elapsed}s  账号: {inst.get('account', '')}",
+        title="实例详情", border_style="cyan"))
+    # 进程
+    p = _get_inst(host, "/api/processes", msg="查进程")
+    ok, pdata = api.check(p)
+    if ok:
+        procs = pdata.get("processes", [])
+        if procs:
+            t = Table(title="进程", show_header=True, header_style="bold cyan")
+            t.add_column("名称", style="bold")
+            t.add_column("状态")
+            t.add_column("PID")
+            t.add_column("隧道")
+            for proc in procs:
+                running = proc.get("running")
+                st = "[green]运行[/]" if running else "[red]停止[/]"
+                tunnels = proc.get("tunnels", [])
+                tc = f"{sum(1 for tn in tunnels if tn.get('running'))}/{len(tunnels)}" if tunnels else "-"
+                t.add_row(proc.get("name", ""), st, str(proc.get("pid", "")), tc)
+            console.print(t)
+        else:
+            console.print("  [dim]无持久化进程[/]")
+    # 资源
+    r = _get_inst(host, "/api/resource", msg="查资源")
+    ok, rdata = api.check(r)
+    if ok:
+        console.print(f"  内存: {rdata.get('mem_avail_kb', 0) // 1024}MB / {rdata.get('mem_total_kb', 0) // 1024}MB")
+        console.print(f"  磁盘: {rdata.get('disk_used_kb', 0) // 1024}MB / {rdata.get('disk_total_kb', 0) // 1024}MB ({rdata.get('disk_use_pct', 0)}%)")
+
+
+def view_config():
+    """查看进程配置（ghvps.json）"""
+    inst = pick_instance()
+    if not inst:
+        return
+    name = _input("  进程名称（留空取消）: ")
+    if name is None:
+        return
+    d = _post_inst(inst["hostname"], "/api/exec",
+                   {"cmd": f"cat /home/kodebite/{name}/ghvps.json 2>/dev/null || echo NOT_FOUND",
+                    "token": config.TOKEN, "timeout": 10}, msg="查看配置")
+    r = d.get("result") or d
+    if r.get("ok"):
+        out = r.get("stdout", "").strip()
+        if out and out != "NOT_FOUND":
+            console.print(Panel(out, title=f"{name} 配置 (ghvps.json)", border_style="cyan"))
+        else:
+            _err(f"配置文件不存在: /home/kodebite/{name}/ghvps.json")
+    else:
+        _err(r.get("error", str(d)))
 
 
 def toggle_mcp():

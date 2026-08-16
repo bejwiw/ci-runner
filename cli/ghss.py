@@ -40,11 +40,37 @@ def json_mode(args):
     if op == "instances":
         print(json_dumps(api.get("/api/instances")))
     elif op == "create":
-        print(json_dumps(api.post("/api/instances")))
+        payload = {}
+        for arg in args[1:]:
+            if arg == "--no-mcp":
+                payload["mcp_enabled"] = False
+            elif not arg.startswith("--"):
+                payload["account"] = arg
+        print(json_dumps(api.post("/api/instances", payload)))
     elif op == "close" and len(args) > 1:
         print(json_dumps(api.delete(f"/api/instances/{args[1]}")))
     elif op == "restart" and len(args) > 1:
         print(json_dumps(api.post(f"/api/instances/{args[1]}/restart")))
+    elif op == "mcp/toggle" and len(args) > 2:
+        inst = api.get("/api/instances")
+        for i in inst.get("instances", []):
+            if i["id"] == args[1]:
+                enabled = args[2].lower() in ("on", "true", "1", "yes")
+                print(json_dumps(api.post_inst(i["hostname"], "/api/mcp/toggle",
+                               {"token": config.TOKEN, "enabled": enabled})))
+                return
+        print(json_dumps({"ok": False, "error": "实例不存在"}))
+    elif op == "detail" and len(args) > 1:
+        inst = api.get("/api/instances")
+        for i in inst.get("instances", []):
+            if i["id"] == args[1]:
+                result = {"instance": i}
+                result["health"] = api.get_inst(i["hostname"], "/api/health")
+                result["processes"] = api.get_inst(i["hostname"], "/api/processes")
+                result["resource"] = api.get_inst(i["hostname"], "/api/resource")
+                print(json_dumps(result))
+                return
+        print(json_dumps({"ok": False, "error": "实例不存在"}))
     elif op == "health" and len(args) > 1:
         inst = api.get("/api/instances")
         for i in inst.get("instances", []):
