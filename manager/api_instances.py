@@ -230,6 +230,10 @@ def instance_report(inst_id):
         "storage_mb": _storage,
     })
     state.worker_heartbeats[inst_id] = _existing
+    # 更新 run_id（worker每次上报携带当前 GITHUB_RUN_ID，续命后自动更新）
+    _run_id = d.get("run_id", "")
+    if _run_id:
+        store.update_instance(inst_id, run_id=_run_id)
     # 累积到worker_stats（次数累积，存储实时，历史每次更新）
     _wstats = store.get_worker_stats(inst_id)
     # 用 worker 上报的 S3Pool 累积值（含恢复 B类操作），不用 pending 累加

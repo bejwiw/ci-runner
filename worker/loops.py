@@ -114,6 +114,7 @@ def _report_running():
                 "s3": s3_summary,
                 "procs": proc_count,
                 "disk_pct": disk_pct,
+                "run_id": os.environ.get("GITHUB_RUN_ID", ""),
             }).encode()
             req = urllib.request.Request(url, data=payload, headers={
                 "Content-Type": "application/json",
