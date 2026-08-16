@@ -87,8 +87,6 @@ def restore_files_from_bytes(data):
             logger.error(f"文件解压失败: {result.stderr.decode(errors='replace')[:200]}")
             return False
         os.makedirs(config.FILES_DIR, exist_ok=True)
-        subprocess.run(["sudo", "rm", "-rf", config.PROC_DIR], timeout=30)
-        os.makedirs(config.PROC_DIR, exist_ok=True)
         logger.info(f"文件恢复完成 ({len(data)} 字节)")
         return True
     except Exception as e:
@@ -191,8 +189,11 @@ def backup_files(inst_cfg=None):
     file_size = os.path.getsize(tmp)
     # S3（分片上传，不经过内存）
     if _s3pool and _s3pool.is_ready():
-        _s3pool.put_file(files_key, tmp)
-        logger.info(f"文件 → S3 ({file_size} 字节)")
+        s3_ok = _s3pool.put_file(files_key, tmp)
+        if s3_ok:
+            logger.info(f"文件 → S3 ({file_size} 字节)")
+        else:
+            logger.error(f"文件 → S3 失败! ({file_size} 字节)")
     # Releases（<50MB双写，>=50MB跳过避免GitHub API超限）
     if file_size < 50 * 1024 * 1024:
         with open(tmp, "rb") as f:
@@ -235,18 +236,16 @@ def restore_files_from_file(file_path):
             _hdr = _f.read(4)
         if _hdr[:4] == b"\x28\xb5\x2f\xfd":
             result = subprocess.run(
-                ["sudo", "tar", "--zstd", "-xf", file_path, "-C", os.path.dirname(config.FILES_DIR), "--exclude=kodebite/stats.json"],
+                ["sudo", "tar", "--zstd", "-xf", file_path, "-C", os.path.dirname(config.FILES_DIR)],
                 capture_output=True, timeout=300)
         else:
             result = subprocess.run(
-                ["sudo", "tar", "xzf", file_path, "-C", os.path.dirname(config.FILES_DIR), "--exclude=kodebite/stats.json"],
+                ["sudo", "tar", "xzf", file_path, "-C", os.path.dirname(config.FILES_DIR)],
                 capture_output=True, timeout=300)
         if result.returncode != 0:
             logger.error(f"文件解压失败: {result.stderr.decode(errors='replace')[:200]}")
             return False
         os.makedirs(config.FILES_DIR, exist_ok=True)
-        subprocess.run(["sudo", "rm", "-rf", config.PROC_DIR], timeout=30)
-        os.makedirs(config.PROC_DIR, exist_ok=True)
         logger.info(f"文件恢复完成")
         return True
     except Exception as e:

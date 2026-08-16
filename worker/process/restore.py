@@ -163,50 +163,11 @@ def restore_one(name, cfg=None):
 
 
 def restore_all():
-    """从S3快照恢复后，scan_configs扫描项目目录，恢复进程
+    """从全量备份恢复后，scan_configs扫描项目目录，恢复进程
 
-    兼容旧格式：如果解压后有processes/目录，将项目目录迁移到FILES_DIR
+    全量备份（files.tar.gz）已包含所有项目文件，解压后直接在FILES_DIR下。
+    不需要从processes/迁移旧格式数据。
     """
-    import shutil
-    proc_dir = pconfig.proc_dir()
-    if os.path.isdir(proc_dir):
-        migrated = 0
-        for name in os.listdir(proc_dir):
-            if name == "manifest.json":
-                continue
-            src = os.path.join(proc_dir, name)
-            dst = os.path.join(config.FILES_DIR, name)
-            if os.path.isdir(src) and not os.path.isdir(dst):
-                try:
-                    shutil.move(src, dst)
-                    # 旧格式：项目文件在 app/ 子目录里，需要移到根目录
-                    app_subdir = os.path.join(dst, "app")
-                    if os.path.isdir(app_subdir):
-                        for item in os.listdir(app_subdir):
-                            src_item = os.path.join(app_subdir, item)
-                            dst_item = os.path.join(dst, item)
-                            if not os.path.exists(dst_item):
-                                shutil.move(src_item, dst_item)
-                            elif os.path.isdir(src_item) and os.path.isdir(dst_item):
-                                for sub in os.listdir(src_item):
-                                    sub_src = os.path.join(src_item, sub)
-                                    sub_dst = os.path.join(dst_item, sub)
-                                    if not os.path.exists(sub_dst):
-                                        shutil.move(sub_src, sub_dst)
-                        try:
-                            os.rmdir(app_subdir)
-                        except OSError:
-                            pass
-                    migrated += 1
-                    logger.info(f"迁移旧格式项目: {name}")
-                except Exception as e:
-                    logger.warning(f"迁移 {name} 失败: {e}")
-        if migrated > 0:
-            try:
-                shutil.rmtree(proc_dir, ignore_errors=True)
-            except Exception:
-                pass
-            logger.info(f"旧格式迁移完成: {migrated} 个项目")
     configs = pconfig.scan_configs()
     if not configs:
         return 0, 0

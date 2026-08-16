@@ -34,6 +34,11 @@ class ProcessManager:
         os.makedirs(config.LOGS_DIR, exist_ok=True)
 
     def snapshot(self, reason="periodic"):
+        """只记录元数据（PID/命令/cwd），不打包上传文件。
+
+        文件备份由 persistence.backup_files() 全量备份负责，不再单独做进程快照。
+        修复Bug 6: 全量备份和进程快照两份数据重叠，恢复时互相覆盖。
+        """
         saved, meta = pbackup.snapshot(reason=reason)
         with self._lock:
             for name, m in meta.items():
@@ -44,88 +49,20 @@ class ProcessManager:
                     "started_at": m.get("saved_at"),
                     "tunnel_pids": old_entry.get("tunnel_pids", {}),
                 }
-        try:
-            self._upload_snapshot()
-        except Exception as e:
-            logger.error(f"快照上传失败: {e}")
         return saved
 
-    def _upload_snapshot(self):
-        """上传进程快照。S3 分片优先，Releases 降级。"""
-        if not self.inst_cfg:
-            return
-        from core import releases
-        inst_id = self.inst_cfg.instance_id
-        key = f"inst-proc/{inst_id}/proc.tar.gz"
-        tmp = pbackup.pack_processes_to_disk()
-        if not tmp:
-            return
-        file_size = os.path.getsize(tmp)
-        if self.s3pool and self.s3pool.is_ready():
-            try:
-                self.s3pool.put_file(key, tmp)
-                logger.info(f"快照已存入 S3 ({file_size} 字节)")
-            except Exception as e:
-                logger.warning(f"S3 快照失败: {e}")
-        if file_size < 50 * 1024 * 1024:
-            with open(tmp, "rb") as f:
-                data = f.read()
-            asset = f"inst-{inst_id}.processes.tar.gz.enc"
-            releases.upload_chunked(asset, data)
-            logger.info(f"快照已存入 Releases ({file_size} 字节)")
-        try:
-            os.remove(tmp)
-        except Exception as e:
-            logger.debug(f"操作失败: {e}")
-
-    def _download_snapshot(self):
-        """下载进程快照。S3 分片优先，Releases 降级。"""
-        if not self.inst_cfg:
-            return
-        from core import releases
-        inst_id = self.inst_cfg.instance_id
-        key = f"inst-proc/{inst_id}/proc.tar.gz"
-        tmp = os.path.join("/tmp/ghbox_backup", "proc_restore.tar.gz")
-        os.makedirs(os.path.dirname(tmp), exist_ok=True)
-        if self.s3pool and self.s3pool.is_ready():
-            try:
-                _psize = self.s3pool.get_storage_size(key)
-                if _psize > 0:
-                    logger.info(f"要恢复快照: {_psize/1048576:.1f}MB")
-                if self.s3pool.get_to_file(key, tmp):
-                    pbackup.unpack_processes_from_file(tmp)
-                    logger.info(f"快照从 S3 恢复")
-                    try:
-                        os.remove(tmp)
-                    except Exception as e:
-                        logger.debug(f"上传快照失败: {e}")
-                    return
-            except Exception as e:
-                logger.warning(f"S3 快照下载失败: {e}")
-        asset = f"inst-{inst_id}.processes.tar.gz.enc"
-        data = releases.download_chunked(asset)
-        if data:
-            with open(tmp, "wb") as f:
-                f.write(data)
-            pbackup.unpack_processes_from_file(tmp)
-            try:
-                os.remove(tmp)
-            except Exception as e:
-                logger.debug(f"清理异常: {e}")
-            logger.info(f"快照从 Releases 恢复")
-
     def final_snapshot(self):
-        logger.info("最终快照")
+        """最终备份 — 直接调全量备份，不再单独做进程快照"""
+        logger.info("最终备份")
         try:
-            self.snapshot(reason="final")
+            from worker import persistence
+            persistence.backup_database(self.inst_cfg)
+            persistence.backup_files(self.inst_cfg)
         except Exception as e:
-            logger.error(f"最终快照失败: {e}")
+            logger.error(f"最终备份失败: {e}")
 
     def restore_all(self):
-        try:
-            self._download_snapshot()
-        except Exception as e:
-            logger.warning(f"快照下载失败: {e}")
+        """恢复进程 — 全量备份已包含所有项目文件，不需要单独下载进程快照"""
         restored, failed = prestore.restore_all()
         # 从scan_configs()填充known字典 + 启动隧道
         configs = pconfig.scan_configs()

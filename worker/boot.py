@@ -58,10 +58,16 @@ def deferred_init():
         try:
             restored, failed = state.proc_mgr.restore_all()
             logger.info(f"进程恢复 {restored} 成功, {failed} 失败 ({time.time()-t0:.1f}s)")
-            state.proc_mgr.snapshot(reason="post_restore")
             state.proc_mgr.start_monitor()
         except Exception as e:
             logger.error(f"进程恢复异常: {e}")
+        # 恢复后做一次全量备份，确保S3有最新数据
+        try:
+            persistence.backup_database(state.inst_cfg)
+            persistence.backup_files(state.inst_cfg)
+            logger.info("恢复后全量备份完成")
+        except Exception as e:
+            logger.warning(f"恢复后备份失败: {e}")
 
     # 5. MCP 服务（检查 mcp_enabled 配置）
     mcp_enabled = state.inst_cfg.raw.get("mcp_enabled", True) if state.inst_cfg and state.inst_cfg.raw else True

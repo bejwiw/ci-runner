@@ -25,7 +25,8 @@ def proc_dir():
 
 
 def proc_config_path(name):
-    return os.path.join(config.PROC_DIR, name, "ghvps.json")
+    """配置文件路径 — 就是项目目录里的ghvps.json，和scan_configs一致"""
+    return os.path.join(config.FILES_DIR, name, "ghvps.json")
 
 
 def manifest_path():
@@ -43,8 +44,12 @@ def is_bash_session(cfg):
 
 
 def pid_file_path(name):
-    """PID文件路径"""
-    return os.path.join(config.PROC_DIR, name, "pid")
+    """PID文件路径 — 写到项目目录下，不依赖processes/目录
+    
+    修复Bug 5: 原来写到processes/<name>/pid，但processes/在恢复时被删，
+    导致崩溃恢复时load_proc_config找不到配置，进程拉不起来。
+    """
+    return os.path.join(config.FILES_DIR, name, "pid")
 
 
 def write_pid_file(name, pid):
@@ -139,11 +144,12 @@ def scan_configs():
 
 
 def save_proc_config(cfg):
-    """保存配置到processes/<name>/ghvps.json（备份用）"""
+    """保存配置到项目目录的ghvps.json"""
     try:
-        d = os.path.join(proc_dir(), cfg["name"])
+        path = proc_config_path(cfg["name"])
+        d = os.path.dirname(path)
         os.makedirs(d, exist_ok=True)
-        with open(proc_config_path(cfg["name"]), "w") as f:
+        with open(path, "w") as f:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
@@ -152,14 +158,14 @@ def save_proc_config(cfg):
 
 
 def load_proc_config(name):
-    """从processes/<name>/ghvps.json读取配置（备份版本）"""
+    """从项目目录的ghvps.json读取配置"""
     path = proc_config_path(name)
     if os.path.exists(path):
         try:
             with open(path) as f:
                 return json.load(f)
         except Exception as e:
-            logger.debug(f"写PID失败: {e}")
+            logger.warning(f"读取配置失败 {name}: {e}")
     return None
 
 

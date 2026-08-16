@@ -128,11 +128,30 @@ class S3Pool:
             }
         self._initialized = True
         self.load_state()
+        # 刷新 used_bytes — 从S3 API查实际存储大小，纠正历史虚高
+        self._refresh_storage_sizes()
         self.start_recovery()
         return True
 
     def is_ready(self):
         return self._initialized
+
+    def _refresh_storage_sizes(self):
+        """从S3 API查询每个桶的实际存储大小，刷新 used_bytes"""
+        try:
+            sizes = self.query_bucket_sizes()
+            with self._lock:
+                for idx, info in sizes.items():
+                    if idx in self._counters:
+                        actual = info.get("size", 0)
+                        old = self._counters[idx]["used_bytes"]
+                        if actual != old:
+                            self._counters[idx]["used_bytes"] = actual
+                            if old > 0 and actual < old:
+                                logger.info(f"账号{idx} used_bytes 纠正: {old/1048576:.1f}MB → {actual/1048576:.1f}MB")
+            logger.info("used_bytes 已从S3 API刷新")
+        except Exception as e:
+            logger.warning(f"刷新存储大小失败: {e}")
 
     def start_recovery(self):
         threading.Thread(target=self._recovery_loop, daemon=True).start()
@@ -172,17 +191,18 @@ class S3Pool:
         return 1 if c.get("status") == "degraded" else 0
 
     def _select_account(self, key, exclude=None):
-        """用一致性哈希选账号，跳过 unavailable/exclude"""
-        exclude = exclude or []
+        """用一致性哈希选账号。只返回原桶，不fallback到其他桶。
+
+        修复Bug 2: put()和get()必须在同一个桶，否则put换桶后get读旧数据。
+        如果原桶不可写，返回None，让调用方处理失败。
+        """
         acct = self._hash_ring.get_account(key)
-        if acct is not None and acct not in exclude and self._is_writable(acct):
+        if acct is None:
+            return None
+        if exclude and acct in exclude:
+            return None
+        if self._is_writable(acct):
             return acct
-        nearby = self._hash_ring.get_nearby_accounts(key, 20)
-        candidates = [i for i in nearby
-                      if i not in exclude and self._is_writable(i)]
-        if candidates:
-            return min(candidates, key=lambda i: (self._priority(i),
-                                                   self._counters[i]["a_count"]))
         return None
 
     def _record_failure(self, idx, error):
@@ -214,45 +234,39 @@ class S3Pool:
                 c["status"] = "active"
             c["last_success"] = time.time()
 
+    def _get_object_size(self, idx, key):
+        """查询指定账号上key的实际大小（用于put时计算差值）"""
+        try:
+            client = self._get_client(idx)
+            from botocore.exceptions import ClientError
+            head = client._client.head_object(
+                Bucket=client.bucket, Key=f"{S3_PREFIX}/{key}")
+            return head.get("ContentLength", 0) or 0
+        except ClientError:
+            return 0
+        except Exception:
+            return 0
+
     # ==================== 写入 ====================
     def put(self, key, data):
         if not self._initialized:
             return False
         account_idx = self._select_account(key)
         if account_idx is None:
-            logger.error(f"无可用账号写入 {key}")
+            logger.error(f"原账号不可写，拒绝写入 {key}")
             return False
+        old_size = self._get_object_size(account_idx, key)
         for attempt in range(MAX_RETRIES):
             try:
                 if self._get_client(account_idx).put(key, data):
                     with self._lock:
                         self._counters[account_idx]["a_count"] += 1
-                        self._counters[account_idx]["used_bytes"] += len(data)
+                        self._counters[account_idx]["used_bytes"] = max(0, self._counters[account_idx]["used_bytes"] + (len(data) - old_size))
                     self._record_success(account_idx)
                     return True
             except Exception as e:
                 logger.warning(f"写入 {key} 到账号{account_idx} 失败(第{attempt+1}次): {e}")
                 self._record_failure(account_idx, e)
-        return self._put_fallback(key, data, [account_idx])
-
-    def _put_fallback(self, key, data, exclude):
-        for _ in range(MAX_FALLBACK):
-            account_idx = self._select_account(key, exclude=exclude)
-            if account_idx is None:
-                break
-            exclude.append(account_idx)
-            try:
-                if self._get_client(account_idx).put(key, data):
-                    with self._lock:
-                        self._counters[account_idx]["a_count"] += 1
-                        self._counters[account_idx]["used_bytes"] += len(data)
-                    self._record_success(account_idx)
-                    logger.info(f"fallback 写入 {key} 到账号{account_idx}")
-                    return True
-            except Exception as e:
-                logger.warning(f"fallback {key} 到账号{account_idx} 失败: {e}")
-                self._record_failure(account_idx, e)
-        logger.error(f"{key} 所有 fallback 都失败")
         return False
 
     # ==================== 读取 ====================
@@ -440,7 +454,7 @@ class S3Pool:
                 if saved.get("month") == current_month:
                     c["a_count"] = saved.get("a_count", 0)
                     c["b_count"] = saved.get("b_count", 0)
-                c["used_bytes"] = saved.get("used_bytes", 0)
+                # 不恢复 used_bytes — 历史值可能虚高，init后从实际查询刷新
                 c["status"] = saved.get("status", "active")
                 c["fail_count"] = saved.get("fail_count", 0)
                 c["last_error"] = saved.get("last_error", "")
@@ -448,7 +462,7 @@ class S3Pool:
                 c["last_success"] = saved.get("last_success", 0)
                 c["month"] = saved.get("month", current_month)
                 restored += 1
-            logger.info(f"恢复 {restored} 个账号计数器")
+            logger.info(f"恢复 {restored} 个账号计数器 (used_bytes 从实际查询刷新)")
         except Exception as e:
             logger.warning(f"恢复计数器失败: {e}")
 
@@ -480,12 +494,13 @@ class S3Pool:
             account = self._select_account(chunk_key)
             if account is None:
                 return idx, None
+            old_size = self._get_object_size(account, chunk_key)
             for attempt in range(MAX_RETRIES):
                 try:
                     if self._get_client(account).put(chunk_key, data):
                         with self._lock:
                             self._counters[account]["a_count"] += 1
-                            self._counters[account]["used_bytes"] += len(data)
+                            self._counters[account]["used_bytes"] = max(0, self._counters[account]["used_bytes"] + (len(data) - old_size))
                         self._record_success(account)
                         return idx, account
                 except Exception as e:
@@ -493,19 +508,6 @@ class S3Pool:
                     account = self._select_account(chunk_key, exclude=[account])
                     if account is None:
                         break
-            for _ in range(MAX_FALLBACK):
-                account = self._select_account(chunk_key, exclude=[account] if account else [])
-                if account is None:
-                    break
-                try:
-                    if self._get_client(account).put(chunk_key, data):
-                        with self._lock:
-                            self._counters[account]["a_count"] += 1
-                            self._counters[account]["used_bytes"] += len(data)
-                        self._record_success(account)
-                        return idx, account
-                except Exception as e:
-                    self._record_failure(account, e)
             return idx, None
 
         workers = _dynamic_concurrency(file_size)
@@ -733,8 +735,10 @@ class _S3Client:
     def put(self, key, data, prefix=S3_PREFIX):
         self._ensure_client()
         full_key = f"{prefix}/{key}" if prefix else key
-        self._client.put_object(Bucket=self.bucket, Key=full_key, Body=data)
-        return True
+        resp = self._client.put_object(Bucket=self.bucket, Key=full_key, Body=data)
+        if resp and resp.get("ETag"):
+            return True
+        return False
 
     def get(self, key, prefix=S3_PREFIX):
         self._ensure_client()
