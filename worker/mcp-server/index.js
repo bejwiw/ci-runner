@@ -193,7 +193,7 @@ const MCP_TOKEN = process.env.EXEC_TOKEN || "";
 const PUBLIC_PATHS = new Set(["/health", "/"]);
 
 app.use((req, res, next) => {
-  if (PUBLIC_PATHS.has(req.path)) return next();
+  if (PUBLIC_PATHS.has(req.path) || req.path.startsWith("/files/")) return next();
   const token = (req.headers["authorization"] || "").replace("Bearer ", "").trim()
     || (req.query.token || "").trim()
     || (req.body && req.body.token ? req.body.token : "");
@@ -680,7 +680,7 @@ async function launchBrowser() {
   throw new Error("浏览器启动失败");
 }
 
-async function getPage(sessName) {
+async function getPage(sessName, options = {}) {
   if (browserSessions.has(sessName)) {
     const sess = browserSessions.get(sessName);
     try {
@@ -709,11 +709,26 @@ async function getPage(sessName) {
     browser = await launchBrowser();
   }
 
-  const context = await browser.newContext({
-    viewport: { width: 1280, height: 720 },
+  const contextOptions = {
+    viewport: { width: options.viewport_width || 1280, height: options.viewport_height || 720 },
     javaScriptEnabled: true,
-    ignoreHTTPSErrors: true
-  });
+    ignoreHTTPSErrors: true,
+  };
+  if (options.user_agent) contextOptions.userAgent = options.user_agent;
+  if (options.locale) contextOptions.locale = options.locale;
+  if (options.timezone) contextOptions.timezoneId = options.timezone;
+  if (options.color_scheme) contextOptions.colorScheme = options.color_scheme;
+  if (options.is_mobile) { contextOptions.isMobile = true; contextOptions.hasTouch = true; }
+  if (options.has_touch) contextOptions.hasTouch = true;
+  if (options.device_scale_factor) contextOptions.deviceScaleFactor = options.device_scale_factor;
+  if (options.offline) contextOptions.offline = true;
+  if (options.geolocation) {
+    const coords = options.geolocation.split(",").map(v => parseFloat(v.trim()));
+    if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+      contextOptions.geolocation = { latitude: coords[0], longitude: coords[1] };
+    }
+  }
+  const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
   browserSessions.set(sessName, { page, context, browser, createdAt: Date.now(), lastActiveAt: Date.now() });
 
@@ -1506,9 +1521,23 @@ function createServer() {
     keyboard: z.string().optional().describe("键盘操作: Enter|Tab|Escape等"),
     network_idle: z.boolean().default(false).describe("等待网络空闲"),
     screenshot_format: z.enum(["png", "jpeg"]).default("png").describe("截图格式"),
+    user_agent: z.string().optional().describe("自定义User-Agent(反检测)"),
+    viewport_width: z.number().min(320).max(3840).optional().describe("视窗宽度(默认1280)"),
+    viewport_height: z.number().min(240).max(2160).optional().describe("视窗高度(默认720)"),
+    block_images: z.boolean().default(false).describe("屏蔽图片资源(加快加载)"),
+    block_resources: z.string().optional().describe("屏蔽资源类型(逗号分隔,如image,stylesheet,font,media)"),
+    color_scheme: z.enum(["light", "dark", "no-preference"]).optional().describe("颜色方案"),
+    locale: z.string().optional().describe("语言(如zh-CN,en-US)"),
+    timezone: z.string().optional().describe("时区(如Asia/Shanghai,America/New_York)"),
+    extra_headers: z.string().optional().describe("额外HTTP头(JSON字符串,如{\"X-Key\":\"value\"})"),
+    is_mobile: z.boolean().default(false).describe("移动设备模式(自动启用触摸)"),
+    has_touch: z.boolean().default(false).describe("启用触摸事件"),
+    geolocation: z.string().optional().describe("地理位置(lat,lng格式,如39.9,116.4)"),
+    offline: z.boolean().default(false).describe("离线模式"),
+    device_scale_factor: z.number().min(0.5).max(4).optional().describe("设备缩放因子(默认1)"),
   }, async (params) => {
     try {
-      const { action, url, selector, text, session, full_page, wait_ms, timeout, execute_js, width, height, wait_until, extract_selector, file_path, drag_from, drag_to, keyboard, network_idle, screenshot_format } = params;
+      const { action, url, selector, text, session, full_page, wait_ms, timeout, execute_js, width, height, wait_until, extract_selector, file_path, drag_from, drag_to, keyboard, network_idle, screenshot_format, user_agent, viewport_width, viewport_height, block_images, block_resources, color_scheme, locale, timezone, extra_headers, is_mobile, has_touch, geolocation, offline, device_scale_factor } = params;
       const sessName = session || "default";
       const timeoutMs = Math.min(Math.max(parseInt(timeout) || 30000, 3000), 120000);
       let result = {};
@@ -1516,7 +1545,40 @@ function createServer() {
       switch (action) {
         case "open": {
           if (!url) return { content: [{ type: "text", text: JSON.stringify({ success: false, error: "open操作需要url参数" }) }] };
-          const page = await getPage(sessName);
+          const browserOpts = {};
+          if (user_agent) browserOpts.user_agent = user_agent;
+          if (viewport_width) browserOpts.viewport_width = viewport_width;
+          if (viewport_height) browserOpts.viewport_height = viewport_height;
+          if (color_scheme) browserOpts.color_scheme = color_scheme;
+          if (locale) browserOpts.locale = locale;
+          if (timezone) browserOpts.timezone = timezone;
+          if (is_mobile) browserOpts.is_mobile = is_mobile;
+          if (has_touch) browserOpts.has_touch = has_touch;
+          if (geolocation) browserOpts.geolocation = geolocation;
+          if (offline) browserOpts.offline = offline;
+          if (device_scale_factor) browserOpts.device_scale_factor = device_scale_factor;
+          if (width) browserOpts.viewport_width = browserOpts.viewport_width || width;
+          if (height) browserOpts.viewport_height = browserOpts.viewport_height || height;
+          const page = await getPage(sessName, browserOpts);
+          if (extra_headers) {
+            try {
+              const headers = JSON.parse(extra_headers);
+              await page.context().setExtraHTTPHeaders(headers);
+            } catch(e) { logger.warn("extra_headers 解析失败", { error: e.message }); }
+          }
+          if (block_images || block_resources) {
+            const blockList = block_resources ? block_resources.split(",").map(t => t.trim()) : [];
+            if (block_images && !blockList.includes("image")) blockList.push("image");
+            if (blockList.length > 0) {
+              await page.route("**/*", route => {
+                if (blockList.includes(route.request().resourceType())) {
+                  route.abort();
+                } else {
+                  route.continue();
+                }
+              });
+            }
+          }
           await page.goto(url, { timeout: timeoutMs, waitUntil: wait_until });
           if (network_idle) await page.waitForLoadState("networkidle", { timeout: timeoutMs }).catch(() => {});
           result = { success: true, action: "open", url: page.url(), title: await page.title() };
@@ -2332,7 +2394,7 @@ app.delete("/api/background/:taskId", (req, res) => {
 app.post("/api/browser", async (req, res) => {
   const t0 = Date.now();
   try {
-    const { action, url, selector, text, session, full_page, wait_ms, timeout, execute_js, width, height, wait_until, extract_selector, file_path, drag_from, drag_to, keyboard, network_idle, screenshot_format } = req.body || {};
+    const { action, url, selector, text, session, full_page, wait_ms, timeout, execute_js, width, height, wait_until, extract_selector, file_path, drag_from, drag_to, keyboard, network_idle, screenshot_format, user_agent, viewport_width, viewport_height, block_images, block_resources, color_scheme, locale, timezone, extra_headers, is_mobile, has_touch, geolocation, offline, device_scale_factor } = req.body || {};
     
     if (!action || typeof action !== "string") {
       return res.status(400).json({
@@ -2349,7 +2411,40 @@ app.post("/api/browser", async (req, res) => {
     switch (action) {
       case "open": {
         if (!url) return res.status(400).json({ success: false, error: "open操作需要url参数" });
-        const page = await getPage(sessName);
+        const browserOpts = {};
+        if (user_agent) browserOpts.user_agent = user_agent;
+        if (viewport_width) browserOpts.viewport_width = viewport_width;
+        if (viewport_height) browserOpts.viewport_height = viewport_height;
+        if (color_scheme) browserOpts.color_scheme = color_scheme;
+        if (locale) browserOpts.locale = locale;
+        if (timezone) browserOpts.timezone = timezone;
+        if (is_mobile) browserOpts.is_mobile = is_mobile;
+        if (has_touch) browserOpts.has_touch = has_touch;
+        if (geolocation) browserOpts.geolocation = geolocation;
+        if (offline) browserOpts.offline = offline;
+        if (device_scale_factor) browserOpts.device_scale_factor = device_scale_factor;
+        if (width) browserOpts.viewport_width = browserOpts.viewport_width || width;
+        if (height) browserOpts.viewport_height = browserOpts.viewport_height || height;
+        const page = await getPage(sessName, browserOpts);
+        if (extra_headers) {
+          try {
+            const headers = JSON.parse(extra_headers);
+            await page.context().setExtraHTTPHeaders(headers);
+          } catch(e) { logger.warn("extra_headers 解析失败", { error: e.message }); }
+        }
+        if (block_images || block_resources) {
+          const blockList = block_resources ? block_resources.split(",").map(t => t.trim()) : [];
+          if (block_images && !blockList.includes("image")) blockList.push("image");
+          if (blockList.length > 0) {
+            await page.route("**/*", route => {
+              if (blockList.includes(route.request().resourceType())) {
+                route.abort();
+              } else {
+                route.continue();
+              }
+            });
+          }
+        }
         await page.goto(url, { timeout: timeoutMs, waitUntil: wait_until || "domcontentloaded" });
         if (network_idle) await page.waitForLoadState("networkidle", { timeout: timeoutMs }).catch(() => {});
         result = { success: true, action: "open", url: page.url(), title: await page.title() };
@@ -2706,6 +2801,170 @@ app.get("/", (req, res) => {
       uptime: process.uptime(),
       memory: Math.round(process.memoryUsage().rss / 1024 / 1024),
     },
+  });
+});
+
+// ============ 浏览器文档接口 ============
+app.get("/api/docs", (req, res) => {
+  res.json({
+    service: "ghbox MCP Terminal Service",
+    version: "8.0.0",
+    tools: {
+      browser_operation: {
+        description: "浏览器自动化操作，支持打开、点击、填写、截图、执行JS等",
+        actions: {
+          open: "打开URL，支持自定义UA/视窗/语言/时区/地理位置/颜色方案/移动模式/离线/屏蔽资源等",
+          snapshot: "获取页面快照，返回交互元素列表(title/href/type/selector/坐标)+页面纯文本",
+          click: "点击元素，支持3级回退：普通click→locator.first().click→force click",
+          fill: "填写输入框，支持3级回退：fill→click+fill→pressSequentially逐字符输入",
+          type: "逐字符输入(延迟50ms)，支持特殊键(Enter/Tab/Escape等)",
+          scroll: "滚动页面，支持up/down/left/right/top/bottom方向",
+          hover: "悬停元素",
+          screenshot: "截图，支持全页/部分、png/jpeg格式",
+          back: "浏览器后退",
+          forward: "浏览器前进",
+          reload: "刷新页面",
+          close: "关闭浏览器会话(清理context和browser)",
+          execute: "执行JavaScript代码，返回执行结果",
+          wait: "等待指定毫秒数",
+          resize: "调整浏览器视窗尺寸(320-3840宽, 240-2160高)",
+          select: "选择下拉框选项，支持label匹配→value匹配回退",
+          press: "按键(Enter/Tab/Escape/ArrowDown等)",
+          upload: "上传文件到input[type=file]",
+          drag: "拖拽元素(从drag_from到drag_to)",
+          extract: "提取元素textContent和innerHTML",
+          pdf: "导出页面为PDF(A4格式)",
+          cookies: "获取/设置Cookie(传text=JSON数组设置，不传=获取)"
+        },
+        parameters: {
+          action: { type: "enum", required: true, values: ["open","snapshot","click","fill","type","scroll","hover","screenshot","back","forward","reload","close","execute","wait","resize","select","press","upload","drag","extract","pdf","cookies"] },
+          url: { type: "string", description: "目标URL(open时必填)" },
+          selector: { type: "string", description: "元素选择器，支持多种语法" },
+          text: { type: "string", description: "文本内容(fill/type/select/press时使用)" },
+          session: { type: "string", default: "default", description: "浏览器会话名称" },
+          full_page: { type: "boolean", default: false, description: "是否全页截图" },
+          wait_ms: { type: "number", min: 100, max: 30000, default: 1000, description: "等待毫秒" },
+          timeout: { type: "number", min: 3000, max: 120000, default: 30000, description: "超时毫秒" },
+          execute_js: { type: "string", description: "执行的JavaScript代码(execute时使用)" },
+          width: { type: "number", description: "浏览器宽度(resize/open时使用)" },
+          height: { type: "number", description: "浏览器高度(resize/open时使用)" },
+          wait_until: { type: "enum", default: "domcontentloaded", values: ["load","domcontentloaded","networkidle","commit"], description: "页面加载等待策略" },
+          extract_selector: { type: "string", description: "提取特定选择器内容(extract时使用)" },
+          file_path: { type: "string", description: "上传文件路径(upload时使用)" },
+          drag_from: { type: "string", description: "拖拽起始选择器(drag时使用)" },
+          drag_to: { type: "string", description: "拖拽目标选择器(drag时使用)" },
+          keyboard: { type: "string", description: "键盘操作: Enter|Tab|Escape等" },
+          network_idle: { type: "boolean", default: false, description: "open后等待网络空闲" },
+          screenshot_format: { type: "enum", default: "png", values: ["png","jpeg"], description: "截图格式" },
+          user_agent: { type: "string", description: "自定义User-Agent(反检测, 仅open时生效)" },
+          viewport_width: { type: "number", min: 320, max: 3840, description: "视窗宽度(默认1280, 仅open时生效)" },
+          viewport_height: { type: "number", min: 240, max: 2160, description: "视窗高度(默认720, 仅open时生效)" },
+          block_images: { type: "boolean", default: false, description: "屏蔽图片资源(加快加载, 仅open时生效)" },
+          block_resources: { type: "string", description: "屏蔽资源类型(逗号分隔: image,stylesheet,font,media, 仅open时生效)" },
+          color_scheme: { type: "enum", values: ["light","dark","no-preference"], description: "颜色方案(仅open时生效)" },
+          locale: { type: "string", description: "语言(如zh-CN,en-US, 仅open时生效)" },
+          timezone: { type: "string", description: "时区(如Asia/Shanghai, 仅open时生效)" },
+          extra_headers: { type: "string", description: "额外HTTP头(JSON字符串, 仅open时生效)" },
+          is_mobile: { type: "boolean", default: false, description: "移动设备模式(自动启用触摸, 仅open时生效)" },
+          has_touch: { type: "boolean", default: false, description: "启用触摸事件(仅open时生效)" },
+          geolocation: { type: "string", description: "地理位置(lat,lng格式,如39.9,116.4, 仅open时生效)" },
+          offline: { type: "boolean", default: false, description: "离线模式(仅open时生效)" },
+          device_scale_factor: { type: "number", min: 0.5, max: 4, description: "设备缩放因子(默认1, 仅open时生效)" }
+        },
+        selector_syntax: {
+          "css": "标准CSS选择器(如 #id, .class, div > a, [data-test='value'])",
+          "role=": "getByRole选择器(如 role=button,name=提交,exact=true)",
+          "text=": "getByText选择器(如 text=登录)",
+          "label=": "getByLabel选择器(如 label=用户名)",
+          "placeholder=": "getByPlaceholder选择器(如 placeholder=请输入)",
+          "testid=": "getByTestId选择器(如 testid=submit-btn)",
+          "title=": "getByTitle选择器(如 title=关闭)",
+          "alt=": "getByAltText选择器(如 alt=logo)"
+        },
+        examples: {
+          basic_open: { action: "open", url: "https://example.com" },
+          open_with_wait: { action: "open", url: "https://example.com", wait_until: "networkidle", timeout: 60000 },
+          click_button: { action: "click", selector: "role=button,name=提交", timeout: 10000 },
+          fill_form: { action: "fill", selector: "label=用户名", text: "admin" },
+          take_screenshot: { action: "screenshot", full_page: true, screenshot_format: "jpeg" },
+          mobile_mode: { action: "open", url: "https://m.example.com", is_mobile: true, locale: "zh-CN", viewport_width: 375, viewport_height: 812 },
+          custom_ua: { action: "open", url: "https://example.com", user_agent: "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)" },
+          block_imgs: { action: "open", url: "https://example.com", block_images: true, block_resources: "stylesheet,font" },
+          dark_mode: { action: "open", url: "https://example.com", color_scheme: "dark" },
+          geo_location: { action: "open", url: "https://maps.example.com", geolocation: "39.9,116.4" },
+          custom_headers: { action: "open", url: "https://api.example.com", extra_headers: '{"X-API-Key":"abc123"}' },
+          extract_content: { action: "extract", extract_selector: "#main-content" },
+          execute_js: { action: "execute", execute_js: "document.title" },
+          press_key: { action: "press", text: "Enter" }
+        }
+      },
+      web_search: {
+        description: "联网搜索(DuckDuckGo主+Wikipedia备选)，支持获取每条结果完整网页内容",
+        parameters: {
+          query: { type: "string", required: true, description: "搜索关键词" },
+          num: { type: "number", min: 1, max: 20, default: 10, description: "结果数" },
+          detail: { type: "boolean", default: false, description: "是否获取每条结果完整网页内容" },
+          detail_max_length: { type: "number", min: 500, max: 30000, default: 5000, description: "每条结果文本最大字符数" }
+        }
+      },
+      page_reader: {
+        description: "读取网页完整内容(支持单个或批量URL)",
+        parameters: {
+          url: { type: "string|string[]", required: true, description: "单个URL或URL数组" },
+          max_content_length: { type: "number", min: 500, max: 30000, default: 30000, description: "文本最大字符数" }
+        }
+      },
+      terminal_execute: {
+        description: "在持久化终端中执行命令(支持会话保持、超时控制)",
+        parameters: {
+          command: { type: "string", required: true, description: "要执行的命令" },
+          session_id: { type: "string", default: "default", description: "终端会话ID" },
+          timeout: { type: "number", min: 1000, max: 1800000, default: 120000, description: "超时毫秒" },
+          max_output_length: { type: "number", min: 100, max: 100000, default: 10000, description: "输出最大字符数" }
+        }
+      },
+      file_upload: {
+        description: "上传文件生成直链(文件保存在服务端，返回可访问URL)",
+        parameters: {
+          file_base64: { type: "string", required: true, description: "文件base64编码" },
+          filename: { type: "string", required: true, description: "文件名(含扩展名)" },
+          content_type: { type: "string", description: "可选MIME类型" }
+        }
+      },
+      file_list: {
+        description: "列出/删除已上传文件",
+        parameters: {
+          filter: { type: "enum", default: "all", values: ["all","image","video","audio","document","other"], description: "类型筛选" },
+          action: { type: "enum", default: "list", values: ["list","delete"], description: "操作" },
+          delete_filename: { type: "string", description: "删除文件名(delete时使用)" }
+        }
+      }
+    },
+    endpoints: {
+      health: "GET /health (无需鉴权)",
+      docs: "GET /api/docs (需鉴权)",
+      search: "GET /api/search?q=关键词&num=10&detail=true",
+      terminal: "POST /api/terminal {command, session_id, timeout} 或 GET /api/terminal?cmd=命令",
+      terminal_sessions: "GET /api/terminal/sessions",
+      files: "GET /files/:filename (无需鉴权，截图等文件直接访问)",
+      file_download: "GET /api/file/download?path=路径",
+      file_upload: "POST /api/file/upload {path, content_base64|content_text, create_dirs}",
+      file_delete: "DELETE /api/file/delete?path=路径&recursive=true",
+      browser: "POST /api/browser {action, url, selector, ...}",
+      browser_sessions: "GET /api/browser/sessions",
+      background: "POST /api/background {command, cwd, max_runtime, name}",
+      mcp: "POST /mcp (MCP协议)",
+      ws_terminal: "WS /ws/terminal (WebSocket终端)"
+    },
+    config: {
+      terminal_max_sessions: "50",
+      terminal_timeout_ms: "3600000(1小时)",
+      browser_max_sessions: "10",
+      browser_session_timeout_ms: "1800000(30分钟)",
+      bg_max_tasks: "50",
+      search_max_results: "20",
+      files_base_url: "从MCP_BASE_URL环境变量读取"
+    }
   });
 });
 

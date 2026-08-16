@@ -763,6 +763,23 @@ def view_config():
         _err(r.get("error", str(d)))
 
 
+def adopt_project():
+    """托管项目：检查进程是否在运行，没有则根据配置启动"""
+    inst = pick_instance()
+    if not inst:
+        return
+    name = _input("  项目名称（留空取消）: ")
+    if name is None:
+        return
+    d = _post_inst(inst["hostname"], "/api/processes/adopt",
+                   {"token": config.TOKEN, "name": name}, msg="托管项目")
+    ok, data = api.check(d)
+    if ok:
+        _ok(data.get("msg", "托管成功"))
+    else:
+        _err(data.get("error", str(data)))
+
+
 def toggle_mcp():
     """启动/关闭 MCP 服务（配置持久化，续命时自动读取）"""
     inst = pick_instance()

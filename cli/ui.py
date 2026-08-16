@@ -96,6 +96,8 @@ def instance_menu():
         console.print(r"  \[c] Worker资源（代理）")
         console.print(r"  \[d] 日志实时跟随")
         console.print(r"  \[e] 批量执行命令")
+        console.print(r"  \[f] MCP 服务开关")
+        console.print(r"  \[g] 托管项目")
         console.print("  [0] 返回")
         choice = ops._input("\n  请选择: ")
         if choice == "1":
@@ -128,6 +130,8 @@ def instance_menu():
             ops.exec_batch()
         elif choice in ("f", "F"):
             ops.toggle_mcp()
+        elif choice in ("g", "G"):
+            ops.adopt_project()
         elif choice == "0" or choice is None:
             break
 

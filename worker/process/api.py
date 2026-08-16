@@ -64,6 +64,47 @@ def snapshot():
     return jsonify(ok=True, saved=saved, msg=f"快照完成，持久化 {saved} 个进程")
 
 
+@bp.route("/api/processes/adopt", methods=["POST"])
+def adopt():
+    """托管项目：检查是否已托管，没有则检查进程/隧道是否在运行，在运行则返回错误让用户手动处理"""
+    data = request.get_json(silent=True) or {}
+    if not _authed(data):
+        return jsonify(ok=False, error="未授权"), 401
+    if not _manager:
+        return jsonify(ok=False, error="进程管理器未初始化"), 500
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify(ok=False, error="name 必填"), 400
+    # 1. 检查是否已托管（PID 文件 + 进程存活）
+    from worker.process import config as pconfig
+    from core import utils
+    pid = pconfig.read_pid_file(name)
+    if pid and utils.is_alive(pid):
+        return jsonify(ok=True, msg=f"{name} 已托管 (pid={pid})")
+    # 2. 检查进程是否在运行（用户可能手动启动了）
+    import subprocess
+    try:
+        r = subprocess.run(f"pgrep -f '{name}'", shell=True, capture_output=True,
+                           text=True, timeout=5, executable="/bin/bash")
+        if r.stdout.strip():
+            pids = r.stdout.strip().split("\n")
+            return jsonify(ok=False, error=f"进程 {name} 正在运行 (pid={','.join(pids)})，请先手动停止再托管"), 409
+    except Exception as e:
+        import log
+        lg = log.setup_logger("proc.api")
+        lg.debug(f"adopt pgrep 异常: {e}")
+    # 3. 检查配置文件是否存在
+    configs = pconfig.scan_configs()
+    if name not in configs:
+        return jsonify(ok=False, error=f"配置文件不存在: {name} 的 ghvps.json 未找到"), 404
+    # 4. 启动进程（自动托管）
+    ok = _manager.start(name)
+    if ok:
+        return jsonify(ok=True, msg=f"{name} 已托管并启动")
+    else:
+        return jsonify(ok=False, error=f"启动 {name} 失败，请检查日志"), 500
+
+
 @bp.route("/api/processes/<name>/restart", methods=["POST"])
 def restart(name):
     data = request.get_json(silent=True) or {}

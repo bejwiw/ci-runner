@@ -141,6 +141,18 @@ def json_mode(args):
                 print(json_dumps(api.get_inst(i["hostname"], "/api/processes")))
                 return
         print(json_dumps({"ok": False, "error": "实例不存在"}))
+    elif op == "adopt" and len(args) > 1:
+        inst = api.get("/api/instances")
+        for i in inst.get("instances", []):
+            if i["id"] == args[1]:
+                name = args[2] if len(args) > 2 else ""
+                if not name:
+                    print(json_dumps({"ok": False, "error": "需要指定项目名称"}))
+                    return
+                print(json_dumps(api.post_inst(i["hostname"], "/api/processes/adopt",
+                               {"token": config.TOKEN, "name": name})))
+                return
+        print(json_dumps({"ok": False, "error": "实例不存在"}))
     elif op == "snapshot" and len(args) > 1:
         inst = api.get("/api/instances")
         for i in inst.get("instances", []):
