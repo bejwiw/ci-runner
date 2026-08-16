@@ -221,7 +221,7 @@ class McpManager:
         os.makedirs(MCP_FILES_DIR, exist_ok=True)
         try:
             self.proc = subprocess.Popen(
-                ["sudo", "-E", "node", "index.js"],
+                ["node", "index.js"],
                 cwd=MCP_SERVER_DIR, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 start_new_session=True)
