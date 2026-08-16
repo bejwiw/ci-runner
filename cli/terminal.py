@@ -116,9 +116,16 @@ def connect_terminal(host):
                     if not ch:
                         continue
                 try:
-                    sio.emit("input", ch.decode("latin-1"))
+                    if sio.connected:
+                        sio.emit("input", ch.decode("latin-1"))
+                    else:
+                        state["force_exit"] = True
+                        sys.stderr.write("\r\n[terminal] 连接已断开\r\n")
+                        break
                 except Exception as e:
+                    state["force_exit"] = True
                     sys.stderr.write(f"\r\n[terminal] {e}\r\n")
+                    break
         except Exception as e:
             sys.stderr.write(f"\r\n[terminal] {e}\r\n")
         finally:
@@ -130,6 +137,8 @@ def connect_terminal(host):
     def _connect():
         sio.connect(url, auth={"token": config.TOKEN, "session": session},
                     transports=["websocket"], wait_timeout=15)
+        if not sio.connected:
+            raise ConnectionError("连接后状态异常")
 
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
