@@ -105,22 +105,3 @@ def test_snapshot_empty(setup_env):
     saved, meta = pbackup.snapshot(reason="test")
     assert saved == 0
     assert meta == {}
-
-
-def test_backup_process_files_copies(setup_env):
-    """backup_process_files 正确复制文件"""
-    files_dir, proc_dir = setup_env
-    proj = os.path.join(files_dir, "myapp")
-    os.makedirs(proj, exist_ok=True)
-    with open(os.path.join(proj, "ghvps.json"), "w") as f:
-        json.dump({"name": "myapp", "command": "node app.js", "cwd": proj}, f)
-    with open(os.path.join(proj, "app.js"), "w") as f:
-        f.write("console.log('hello')")
-    from worker.process.backup import backup_process_files
-    cfg = {"name": "myapp", "command": "node app.js", "cwd": proj, "exclude": []}
-    ok, size_mb, cfg = backup_process_files(cfg)
-    assert ok is True
-    assert cfg["files_backed"] is True
-    # app.js 应该被复制到 processes/myapp/app/
-    dest = os.path.join(proc_dir, "myapp", "app", "app.js")
-    assert os.path.exists(dest)

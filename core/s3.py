@@ -137,19 +137,27 @@ class S3Pool:
         return self._initialized
 
     def _refresh_storage_sizes(self):
-        """从S3 API查询每个桶的实际存储大小，刷新 used_bytes"""
+        """后台线程：从S3 API查询所有桶的实际存储大小，刷新 used_bytes。
+
+        不阻塞启动，后台并发查询全部账号。put已修复差值计算，
+        这里作为兜底纠正历史偏差。
+        """
+        threading.Thread(target=self._do_refresh_storage_sizes, daemon=True).start()
+
+    def _do_refresh_storage_sizes(self):
         try:
-            sizes = self.query_bucket_sizes()
+            all_indices = list(range(1, len(self._accounts) + 1))
+            sizes = self.query_bucket_sizes(account_indices=all_indices, concurrency=50)
             with self._lock:
+                corrected = 0
                 for idx, info in sizes.items():
                     if idx in self._counters:
                         actual = info.get("size", 0)
                         old = self._counters[idx]["used_bytes"]
                         if actual != old:
                             self._counters[idx]["used_bytes"] = actual
-                            if old > 0 and actual < old:
-                                logger.info(f"账号{idx} used_bytes 纠正: {old/1048576:.1f}MB → {actual/1048576:.1f}MB")
-            logger.info("used_bytes 已从S3 API刷新")
+                            corrected += 1
+            logger.info(f"used_bytes 已刷新 ({len(sizes)}桶, 纠正{corrected}个)")
         except Exception as e:
             logger.warning(f"刷新存储大小失败: {e}")
 
@@ -454,7 +462,8 @@ class S3Pool:
                 if saved.get("month") == current_month:
                     c["a_count"] = saved.get("a_count", 0)
                     c["b_count"] = saved.get("b_count", 0)
-                # 不恢复 used_bytes — 历史值可能虚高，init后从实际查询刷新
+                # 恢复 used_bytes — put已修复差值计算，新数据精确，可放心恢复
+                c["used_bytes"] = saved.get("used_bytes", 0)
                 c["status"] = saved.get("status", "active")
                 c["fail_count"] = saved.get("fail_count", 0)
                 c["last_error"] = saved.get("last_error", "")
@@ -462,7 +471,7 @@ class S3Pool:
                 c["last_success"] = saved.get("last_success", 0)
                 c["month"] = saved.get("month", current_month)
                 restored += 1
-            logger.info(f"恢复 {restored} 个账号计数器 (used_bytes 从实际查询刷新)")
+            logger.info(f"恢复 {restored} 个账号计数器")
         except Exception as e:
             logger.warning(f"恢复计数器失败: {e}")
 
@@ -624,9 +633,21 @@ class S3Pool:
             try:
                 client = self._get_client(idx)
                 bucket = self._accounts[idx - 1]["bucket"] if idx > 0 else self._bootstrap["bucket"]
-                resp = client._client.list_objects_v2(Bucket=bucket, MaxKeys=MAX_LIST_KEYS)
-                total = sum(obj.get("Size", 0) for obj in resp.get("Contents", []))
-                count = resp.get("KeyCount", 0)
+                total = 0
+                count = 0
+                token = None
+                # 分页查询直到 IsTruncated=False，避免漏掉超1000个对象
+                while True:
+                    kwargs = {"Bucket": bucket, "MaxKeys": MAX_LIST_KEYS}
+                    if token:
+                        kwargs["ContinuationToken"] = token
+                    resp = client._client.list_objects_v2(**kwargs)
+                    total += sum(obj.get("Size", 0) for obj in resp.get("Contents", []))
+                    count += resp.get("KeyCount", 0)
+                    if resp.get("IsTruncated"):
+                        token = resp.get("NextContinuationToken")
+                    else:
+                        break
                 return idx, {"bucket": bucket, "size": total, "count": count}
             except Exception as e:
                 return idx, {"bucket": "?", "size": 0, "count": 0, "error": str(e)[:100]}

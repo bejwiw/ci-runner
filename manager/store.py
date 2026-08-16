@@ -310,23 +310,17 @@ def purge_instance_data(inst_id):
 
     # ==================== S3 清理 ====================
     if _s3pool and _s3pool.is_ready():
-        # 所有可能的key前缀
-        s3_prefixes = [
-            f"inst-data/{inst_id}",
-            f"inst-files/{inst_id}",
-            f"inst-proc/{inst_id}",
+        # 备份时实际的 S3 key（与 persistence.backup_database/backup_files 一致）
+        s3_keys = [
+            f"inst-data/{inst_id}/db",            # 数据库
+            f"inst-files/{inst_id}/files.tar.gz",  # 文件全量备份
+            f"inst-proc/{inst_id}/proc.tar.gz",    # 进程快照（旧，已废弃）
         ]
-        for prefix in s3_prefixes:
-            # 可能的数据文件
-            data_keys = [
-                prefix,                    # 单文件版本（db / files.tar.gz / proc.tar.gz）
-                f"{prefix}.manifest",       # 分片清单
-                f"{prefix}.chunk0",        # 兜底：至少尝试chunk0
-            ]
-            # 1. 查manifest获取分片列表
+        for key in s3_keys:
+            # 1. 查 manifest 获取分片列表（大文件分片存储）
             manifest_data = None
             try:
-                manifest_data = _s3pool.get(f"{prefix}.manifest")
+                manifest_data = _s3pool.get(f"{key}.manifest")
             except Exception:
                 pass
 
@@ -335,39 +329,38 @@ def purge_instance_data(inst_id):
                     m = _json.loads(manifest_data)
                     num_chunks = m.get("chunks", 0)
                     locations = m.get("locations", [])
-                    # 2a. 按manifest的locations精确删除每个分片
+                    # 2a. 按 manifest 的 locations 精确删除每个分片
                     for loc in locations:
                         chunk_idx = loc.get("chunk", 0)
-                        chunk_key = f"{prefix}.chunk{chunk_idx}"
+                        chunk_key = f"{key}.chunk{chunk_idx}"
                         try:
                             if _s3pool.delete(chunk_key):
                                 logger.info(f"S3 清理分片 {chunk_key}")
                         except Exception as e:
                             logger.warning(f"S3 清理 {chunk_key} 失败: {e}")
-                    # 2b. locations不完整时用num_chunks兜底
+                    # 2b. locations 不完整时用 num_chunks 兜底
                     if len(locations) < num_chunks:
                         for i in range(num_chunks):
-                            chunk_key = f"{prefix}.chunk{i}"
+                            chunk_key = f"{key}.chunk{i}"
                             try:
                                 _s3pool.delete(chunk_key)
                             except Exception:
                                 pass
-                    # 3. 删除manifest本身
+                    # 3. 删除 manifest 本身
                     try:
-                        _s3pool.delete(f"{prefix}.manifest")
+                        _s3pool.delete(f"{key}.manifest")
                     except Exception as e:
                         logger.warning(f"S3 清理 manifest 失败: {e}")
-                    logger.info(f"S3 分片清理 {prefix} ({num_chunks}块)")
+                    logger.info(f"S3 分片清理 {key} ({num_chunks}块)")
                 except Exception as e:
-                    logger.warning(f"S3 解析manifest {prefix} 失败: {e}")
+                    logger.warning(f"S3 解析 manifest {key} 失败: {e}")
 
-            # 4. 删除单文件版本（覆盖写的最新数据或小文件）
-            for key in data_keys:
-                try:
-                    if _s3pool.delete(key):
-                        logger.info(f"S3 清理 {key}")
-                except Exception as e:
-                    logger.warning(f"S3 清理 {key} 失败: {e}")
+            # 4. 删除单文件版本
+            try:
+                if _s3pool.delete(key):
+                    logger.info(f"S3 清理 {key}")
+            except Exception as e:
+                logger.warning(f"S3 清理 {key} 失败: {e}")
 
     # ==================== Releases 清理 ====================
     # Releases的asset名格式: inst-{id}.xxx.enc

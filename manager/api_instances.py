@@ -159,9 +159,14 @@ def _trigger_worker(account, inst_id):
         raise RuntimeError(f"触发失败: {status} {d}")
     time.sleep(4)
     status, d = ghapi.gh_request("GET",
-        f"{ghapi.API_BASE}/repos/{repo}/actions/runs?per_page=1",
+        f"{ghapi.API_BASE}/repos/{repo}/actions/runs?per_page=10&event=workflow_dispatch",
         token=account["token"])
-    return d["workflow_runs"][0]["id"] if status == 200 and d.get("workflow_runs") else None
+    if status == 200:
+        for r in d.get("workflow_runs", []):
+            # 只找 worker workflow 的 run，避免误取 manager 等其他 workflow
+            if r.get("name") == "worker" or "worker" in (r.get("path") or ""):
+                return r["id"]
+    return None
 
 
 @bp.route("/api/instances", methods=["GET"])
@@ -191,15 +196,23 @@ def close_instance(inst_id):
     account = next((a for a in accounts.load_accounts()
                     if a["name"] == inst.get("account")), None)
     if account and inst.get("run_id"):
-        ghapi.gh_request("POST",
-            f"{ghapi.API_BASE}/repos/{account['repo']}/actions/runs/{inst['run_id']}/cancel",
-            token=account["token"])
+        try:
+            _c_status, _ = ghapi.gh_request("POST",
+                f"{ghapi.API_BASE}/repos/{account['repo']}/actions/runs/{inst['run_id']}/cancel",
+                token=account["token"])
+            if _c_status not in (200, 202):
+                logger.warning(f"取消 run {inst['run_id']} 失败: HTTP {_c_status}")
+            else:
+                logger.info(f"已取消 run {inst['run_id']}")
+        except Exception as e:
+            logger.warning(f"取消 run {inst['run_id']} 异常: {e}")
     store.delete_instance_config(inst_id)
     if inst.get("tunnel_id"):
         tunnels.delete_tunnel(inst["tunnel_id"], inst.get("hostname", ""))
     if inst.get("mcp_tunnel_id"):
         tunnels.delete_tunnel(inst["mcp_tunnel_id"], inst.get("mcp_hostname", ""))
-    store.purge_instance_data(inst_id)
+    # 异步清理备份数据，不阻塞 close 响应（大量分片时可能较慢）
+    threading.Thread(target=store.purge_instance_data, args=(inst_id,), daemon=True).start()
     state.worker_heartbeats.pop(inst_id, None)
     store.close_instance(inst_id)
     return jsonify(ok=True, msg=f"实例 {inst_id} 已关闭")

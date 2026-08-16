@@ -157,13 +157,25 @@ def _worker_pre_wake():
                 except Exception as e:
                     persistence.record_backup("failed", 0, f"prewake: {e}", 0, 0)
                     logger.error(f"备份失败: {e}")
-                # 触发下一个 worker
+                # 触发下一个 worker（重试3次，避免续命失败导致实例到期终止）
                 url = (f"{ghapi.API_BASE}/repos/{config.REPO}/actions/workflows/"
                        f"{config.WORKER_WORKFLOW}/dispatches")
-                ghapi.gh_request("POST", url,
-                                 data={"ref": "main",
-                                       "inputs": {"INSTANCE_ID": config.INSTANCE_ID}})
-                logger.info(f"已预触发 ({elapsed}s)")
+                _triggered = False
+                for _attempt in range(3):
+                    try:
+                        _st, _ = ghapi.gh_request("POST", url,
+                                                  data={"ref": "main",
+                                                        "inputs": {"INSTANCE_ID": config.INSTANCE_ID}})
+                        if _st in (200, 204):
+                            _triggered = True
+                            break
+                    except Exception as e:
+                        logger.warning(f"续命触发第{_attempt+1}次失败: {e}")
+                    time.sleep(3)
+                if _triggered:
+                    logger.info(f"已预触发 ({elapsed}s)")
+                else:
+                    logger.error("续命触发失败(3次重试)，实例将到期终止")
             except Exception as e:
                 logger.error(f"触发失败: {e}")
             break
