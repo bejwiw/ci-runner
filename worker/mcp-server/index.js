@@ -2807,163 +2807,218 @@ app.get("/", (req, res) => {
 // ============ 浏览器文档接口 ============
 app.get("/api/docs", (req, res) => {
   res.json({
-    service: "ghbox MCP Terminal Service",
-    version: "8.0.0",
-    tools: {
-      browser_operation: {
-        description: "浏览器自动化操作，支持打开、点击、填写、截图、执行JS等",
-        actions: {
-          open: "打开URL，支持自定义UA/视窗/语言/时区/地理位置/颜色方案/移动模式/离线/屏蔽资源等",
-          snapshot: "获取页面快照，返回交互元素列表(title/href/type/selector/坐标)+页面纯文本",
-          click: "点击元素，支持3级回退：普通click→locator.first().click→force click",
-          fill: "填写输入框，支持3级回退：fill→click+fill→pressSequentially逐字符输入",
-          type: "逐字符输入(延迟50ms)，支持特殊键(Enter/Tab/Escape等)",
-          scroll: "滚动页面，支持up/down/left/right/top/bottom方向",
-          hover: "悬停元素",
-          screenshot: "截图，支持全页/部分、png/jpeg格式",
-          back: "浏览器后退",
-          forward: "浏览器前进",
-          reload: "刷新页面",
-          close: "关闭浏览器会话(清理context和browser)",
-          execute: "执行JavaScript代码，返回执行结果",
-          wait: "等待指定毫秒数",
-          resize: "调整浏览器视窗尺寸(320-3840宽, 240-2160高)",
-          select: "选择下拉框选项，支持label匹配→value匹配回退",
-          press: "按键(Enter/Tab/Escape/ArrowDown等)",
-          upload: "上传文件到input[type=file]",
-          drag: "拖拽元素(从drag_from到drag_to)",
-          extract: "提取元素textContent和innerHTML",
-          pdf: "导出页面为PDF(A4格式)",
-          cookies: "获取/设置Cookie(传text=JSON数组设置，不传=获取)"
-        },
-        parameters: {
-          action: { type: "enum", required: true, values: ["open","snapshot","click","fill","type","scroll","hover","screenshot","back","forward","reload","close","execute","wait","resize","select","press","upload","drag","extract","pdf","cookies"] },
-          url: { type: "string", description: "目标URL(open时必填)" },
-          selector: { type: "string", description: "元素选择器，支持多种语法" },
-          text: { type: "string", description: "文本内容(fill/type/select/press时使用)" },
-          session: { type: "string", default: "default", description: "浏览器会话名称" },
-          full_page: { type: "boolean", default: false, description: "是否全页截图" },
-          wait_ms: { type: "number", min: 100, max: 30000, default: 1000, description: "等待毫秒" },
-          timeout: { type: "number", min: 3000, max: 120000, default: 30000, description: "超时毫秒" },
-          execute_js: { type: "string", description: "执行的JavaScript代码(execute时使用)" },
-          width: { type: "number", description: "浏览器宽度(resize/open时使用)" },
-          height: { type: "number", description: "浏览器高度(resize/open时使用)" },
-          wait_until: { type: "enum", default: "domcontentloaded", values: ["load","domcontentloaded","networkidle","commit"], description: "页面加载等待策略" },
-          extract_selector: { type: "string", description: "提取特定选择器内容(extract时使用)" },
-          file_path: { type: "string", description: "上传文件路径(upload时使用)" },
-          drag_from: { type: "string", description: "拖拽起始选择器(drag时使用)" },
-          drag_to: { type: "string", description: "拖拽目标选择器(drag时使用)" },
-          keyboard: { type: "string", description: "键盘操作: Enter|Tab|Escape等" },
-          network_idle: { type: "boolean", default: false, description: "open后等待网络空闲" },
-          screenshot_format: { type: "enum", default: "png", values: ["png","jpeg"], description: "截图格式" },
-          user_agent: { type: "string", description: "自定义User-Agent(反检测, 仅open时生效)" },
-          viewport_width: { type: "number", min: 320, max: 3840, description: "视窗宽度(默认1280, 仅open时生效)" },
-          viewport_height: { type: "number", min: 240, max: 2160, description: "视窗高度(默认720, 仅open时生效)" },
-          block_images: { type: "boolean", default: false, description: "屏蔽图片资源(加快加载, 仅open时生效)" },
-          block_resources: { type: "string", description: "屏蔽资源类型(逗号分隔: image,stylesheet,font,media, 仅open时生效)" },
-          color_scheme: { type: "enum", values: ["light","dark","no-preference"], description: "颜色方案(仅open时生效)" },
-          locale: { type: "string", description: "语言(如zh-CN,en-US, 仅open时生效)" },
-          timezone: { type: "string", description: "时区(如Asia/Shanghai, 仅open时生效)" },
-          extra_headers: { type: "string", description: "额外HTTP头(JSON字符串, 仅open时生效)" },
-          is_mobile: { type: "boolean", default: false, description: "移动设备模式(自动启用触摸, 仅open时生效)" },
-          has_touch: { type: "boolean", default: false, description: "启用触摸事件(仅open时生效)" },
-          geolocation: { type: "string", description: "地理位置(lat,lng格式,如39.9,116.4, 仅open时生效)" },
-          offline: { type: "boolean", default: false, description: "离线模式(仅open时生效)" },
-          device_scale_factor: { type: "number", min: 0.5, max: 4, description: "设备缩放因子(默认1, 仅open时生效)" }
-        },
-        selector_syntax: {
-          "css": "标准CSS选择器(如 #id, .class, div > a, [data-test='value'])",
-          "role=": "getByRole选择器(如 role=button,name=提交,exact=true)",
-          "text=": "getByText选择器(如 text=登录)",
-          "label=": "getByLabel选择器(如 label=用户名)",
-          "placeholder=": "getByPlaceholder选择器(如 placeholder=请输入)",
-          "testid=": "getByTestId选择器(如 testid=submit-btn)",
-          "title=": "getByTitle选择器(如 title=关闭)",
-          "alt=": "getByAltText选择器(如 alt=logo)"
-        },
-        examples: {
-          basic_open: { action: "open", url: "https://example.com" },
-          open_with_wait: { action: "open", url: "https://example.com", wait_until: "networkidle", timeout: 60000 },
-          click_button: { action: "click", selector: "role=button,name=提交", timeout: 10000 },
-          fill_form: { action: "fill", selector: "label=用户名", text: "admin" },
-          take_screenshot: { action: "screenshot", full_page: true, screenshot_format: "jpeg" },
-          mobile_mode: { action: "open", url: "https://m.example.com", is_mobile: true, locale: "zh-CN", viewport_width: 375, viewport_height: 812 },
-          custom_ua: { action: "open", url: "https://example.com", user_agent: "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)" },
-          block_imgs: { action: "open", url: "https://example.com", block_images: true, block_resources: "stylesheet,font" },
-          dark_mode: { action: "open", url: "https://example.com", color_scheme: "dark" },
-          geo_location: { action: "open", url: "https://maps.example.com", geolocation: "39.9,116.4" },
-          custom_headers: { action: "open", url: "https://api.example.com", extra_headers: '{"X-API-Key":"abc123"}' },
-          extract_content: { action: "extract", extract_selector: "#main-content" },
-          execute_js: { action: "execute", execute_js: "document.title" },
-          press_key: { action: "press", text: "Enter" }
-        }
-      },
-      web_search: {
-        description: "联网搜索(DuckDuckGo主+Wikipedia备选)，支持获取每条结果完整网页内容",
-        parameters: {
-          query: { type: "string", required: true, description: "搜索关键词" },
-          num: { type: "number", min: 1, max: 20, default: 10, description: "结果数" },
-          detail: { type: "boolean", default: false, description: "是否获取每条结果完整网页内容" },
-          detail_max_length: { type: "number", min: 500, max: 30000, default: 5000, description: "每条结果文本最大字符数" }
-        }
-      },
-      page_reader: {
-        description: "读取网页完整内容(支持单个或批量URL)",
-        parameters: {
-          url: { type: "string|string[]", required: true, description: "单个URL或URL数组" },
-          max_content_length: { type: "number", min: 500, max: 30000, default: 30000, description: "文本最大字符数" }
-        }
-      },
-      terminal_execute: {
-        description: "在持久化终端中执行命令(支持会话保持、超时控制)",
-        parameters: {
-          command: { type: "string", required: true, description: "要执行的命令" },
-          session_id: { type: "string", default: "default", description: "终端会话ID" },
-          timeout: { type: "number", min: 1000, max: 1800000, default: 120000, description: "超时毫秒" },
-          max_output_length: { type: "number", min: 100, max: 100000, default: 10000, description: "输出最大字符数" }
-        }
-      },
-      file_upload: {
-        description: "上传文件生成直链(文件保存在服务端，返回可访问URL)",
-        parameters: {
-          file_base64: { type: "string", required: true, description: "文件base64编码" },
-          filename: { type: "string", required: true, description: "文件名(含扩展名)" },
-          content_type: { type: "string", description: "可选MIME类型" }
-        }
-      },
-      file_list: {
-        description: "列出/删除已上传文件",
-        parameters: {
-          filter: { type: "enum", default: "all", values: ["all","image","video","audio","document","other"], description: "类型筛选" },
-          action: { type: "enum", default: "list", values: ["list","delete"], description: "操作" },
-          delete_filename: { type: "string", description: "删除文件名(delete时使用)" }
-        }
+    tool: "browser_operation",
+    description: "浏览器自动化操作，基于Playwright(cloakbrowser)实现。支持22种操作和33个参数，包括自定义UA、视窗、语言、时区、地理位置、颜色方案、移动模式、离线、资源屏蔽等。",
+    browser_engine: {
+      name: "cloakbrowser (基于Playwright)",
+      headless: true,
+      stealth: true,
+      anti_detection: ["fingerprint随机化", "fingerprint-platform=windows", "移除--enable-automation标记", "humanize=true"],
+      default_timezone: "America/New_York",
+      session_management: {
+        max_sessions: config.browserMaxSessions,
+        session_timeout_ms: config.browserSessionTimeoutMs,
+        timeout_human: "30分钟无活动自动清理",
+        auto_cleanup_interval: "每5分钟检查一次"
       }
     },
-    endpoints: {
-      health: "GET /health (无需鉴权)",
-      docs: "GET /api/docs (需鉴权)",
-      search: "GET /api/search?q=关键词&num=10&detail=true",
-      terminal: "POST /api/terminal {command, session_id, timeout} 或 GET /api/terminal?cmd=命令",
-      terminal_sessions: "GET /api/terminal/sessions",
-      files: "GET /files/:filename (无需鉴权，截图等文件直接访问)",
-      file_download: "GET /api/file/download?path=路径",
-      file_upload: "POST /api/file/upload {path, content_base64|content_text, create_dirs}",
-      file_delete: "DELETE /api/file/delete?path=路径&recursive=true",
-      browser: "POST /api/browser {action, url, selector, ...}",
-      browser_sessions: "GET /api/browser/sessions",
-      background: "POST /api/background {command, cwd, max_runtime, name}",
-      mcp: "POST /mcp (MCP协议)",
-      ws_terminal: "WS /ws/terminal (WebSocket终端)"
+    actions: {
+      open: {
+        description: "打开指定URL",
+        required_params: ["url"],
+        optional_params: ["wait_until", "timeout", "network_idle", "user_agent", "viewport_width", "viewport_height", "block_images", "block_resources", "color_scheme", "locale", "timezone", "extra_headers", "is_mobile", "has_touch", "geolocation", "offline", "device_scale_factor", "width", "height"],
+        notes: "自定义参数仅在创建新会话时生效(首次open)。已有会话复用之前的Context设置。width/height与viewport_width/viewport_height等价，优先使用viewport_版本。"
+      },
+      snapshot: {
+        description: "获取页面快照，返回交互元素列表和页面纯文本",
+        returns: "url, title, elements[{selector,tag,text,href,type,placeholder,id,class,src,value,editable,rect{x,y,w,h}}], body_text(最多5000字符), element_count",
+        notes: "元素选择器自动生成策略：testid > id > role=link/button > placeholder > label > alt > title > text > tag"
+      },
+      click: {
+        description: "点击元素",
+        required_params: ["selector"],
+        fallback_strategy: "1.普通click(timeout=timeoutMs) → 2.locator.first().click(timeout=timeoutMs) → 3.locator.first().click(force=true, timeout=5000)",
+        notes: "点击后自动等待500ms"
+      },
+      fill: {
+        description: "填写输入框",
+        required_params: ["selector", "text"],
+        fallback_strategy: "1.locator.fill(timeout=5000) → 2.click+fill(timeout=5000) → 3.click+pressSequentially(delay=30, timeout=15000)",
+        notes: "方法3为逐字符输入，兼容性最好"
+      },
+      type: {
+        description: "逐字符输入(模拟真实打字)",
+        required_params: ["selector", "text"],
+        params: {"delay": "50ms(每字符间隔)", "timeout": "timeoutMs"},
+        notes: "先click再pressSequentially，支持特殊键"
+      },
+      scroll: {
+        description: "滚动页面",
+        optional_params: ["text"],
+        directions: "down(默认), up, left, right, top, bottom",
+        amounts: "down/up/left/right=500px, top/bottom=到顶/到底"
+      },
+      hover: {
+        description: "悬停元素",
+        required_params: ["selector"]
+      },
+      screenshot: {
+        description: "截取页面截图",
+        optional_params: ["full_page", "screenshot_format"],
+        returns: "file(文件名), url(访问链接), size(文件大小), full_page(是否全页)",
+        notes: "截图保存到filesDir，返回的URL无需鉴权可直接访问"
+      },
+      back: {
+        description: "浏览器后退",
+        notes: "waitUntil=domcontentloaded, 失败静默处理"
+      },
+      forward: {
+        description: "浏览器前进",
+        notes: "waitUntil=domcontentloaded, 失败静默处理"
+      },
+      reload: {
+        description: "刷新当前页面",
+        notes: "waitUntil=domcontentloaded"
+      },
+      close: {
+        description: "关闭浏览器会话",
+        notes: "清理context和browser进程，释放资源"
+      },
+      execute: {
+        description: "在页面中执行JavaScript代码",
+        required_params: ["execute_js"],
+        returns: "result(JS执行返回值)",
+        notes: "使用page.evaluate，支持返回值"
+      },
+      wait: {
+        description: "等待指定毫秒数",
+        optional_params: ["wait_ms"],
+        range: "100-30000ms, 默认1000ms"
+      },
+      resize: {
+        description: "调整浏览器视窗尺寸",
+        optional_params: ["width", "height"],
+        range: "width: 320-3840, height: 240-2160",
+        notes: "使用setViewportSize实时调整"
+      },
+      select: {
+        description: "选择下拉框选项",
+        required_params: ["selector", "text"],
+        fallback_strategy: "1.selectOption({label: text}, timeout=timeoutMs) → 2.selectOption({value: text}, timeout=5000)",
+        notes: "先按label匹配，失败后按value匹配"
+      },
+      press: {
+        description: "按键",
+        required_params: ["text"],
+        examples: "Enter, Tab, Escape, ArrowDown, ArrowUp, Backspace, Delete, Control+C"
+      },
+      upload: {
+        description: "上传文件到input[type=file]",
+        required_params: ["selector", "file_path"],
+        notes: "使用setInputFiles，file_path为服务端绝对路径"
+      },
+      drag: {
+        description: "拖拽元素",
+        required_params: ["drag_from", "drag_to"],
+        notes: "使用Playwright dragTo，参数为CSS选择器(不支持role=等语法)"
+      },
+      extract: {
+        description: "提取元素内容",
+        optional_params: ["extract_selector", "selector"],
+        returns: "text(textContent), html(innerHTML)",
+        notes: "默认提取body。selector优先级: extract_selector > selector > body"
+      },
+      pdf: {
+        description: "导出页面为PDF",
+        notes: "A4格式, printBackground=true, 保存到filesDir返回URL"
+      },
+      cookies: {
+        description: "获取或设置Cookie",
+        get: "不传text参数 → 返回当前所有Cookie",
+        set: "传text=JSON数组 → 添加Cookie(格式同Playwright addCookies)",
+        notes: "操作当前会话的Context级别Cookie"
+      }
     },
-    config: {
-      terminal_max_sessions: "50",
-      terminal_timeout_ms: "3600000(1小时)",
-      browser_max_sessions: "10",
-      browser_session_timeout_ms: "1800000(30分钟)",
-      bg_max_tasks: "50",
-      search_max_results: "20",
-      files_base_url: "从MCP_BASE_URL环境变量读取"
+    parameters: {
+      action: { type: "enum", required: true, values: ["open","snapshot","click","fill","type","scroll","hover","screenshot","back","forward","reload","close","execute","wait","resize","select","press","upload","drag","extract","pdf","cookies"], description: "操作类型" },
+      url: { type: "string", required_when: "open", description: "目标URL" },
+      selector: { type: "string", required_when: "click,fill,type,hover,select,upload", description: "元素选择器，支持多种语法(见selector_syntax)" },
+      text: { type: "string", used_by: "fill,type,select,press,scroll,cookies", description: "文本/按键/方向/Cookie JSON" },
+      session: { type: "string", default: "default", description: "浏览器会话名称，不同会话独立(各自一个Browser+Context)" },
+      full_page: { type: "boolean", default: false, description: "是否截取整个页面(含滚动区域)" },
+      wait_ms: { type: "number", min: 100, max: 30000, default: 1000, description: "wait操作的等待毫秒数" },
+      timeout: { type: "number", min: 3000, max: 120000, default: 30000, description: "操作超时毫秒数" },
+      execute_js: { type: "string", required_when: "execute", description: "要执行的JavaScript代码，支持return返回值" },
+      width: { type: "number", used_by: "resize,open", description: "浏览器宽度(resize: 320-3840, open: 同viewport_width)" },
+      height: { type: "number", used_by: "resize,open", description: "浏览器高度(resize: 240-2160, open: 同viewport_height)" },
+      wait_until: { type: "enum", default: "domcontentloaded", values: ["load","domcontentloaded","networkidle","commit"], description: "open时的页面加载等待策略。load=完全加载, domcontentloaded=DOM就绪, networkidle=网络空闲, commit=请求提交" },
+      extract_selector: { type: "string", used_by: "extract", description: "提取特定选择器的内容(优先级高于selector)" },
+      file_path: { type: "string", required_when: "upload", description: "上传文件的服务端绝对路径" },
+      drag_from: { type: "string", required_when: "drag", description: "拖拽起始元素选择器(CSS)" },
+      drag_to: { type: "string", required_when: "drag", description: "拖拽目标元素选择器(CSS)" },
+      keyboard: { type: "string", description: "键盘操作(预留参数, 当前未使用)" },
+      network_idle: { type: "boolean", default: false, description: "open后额外等待networkidle状态(与wait_until=networkidle叠加)" },
+      screenshot_format: { type: "enum", default: "png", values: ["png","jpeg"], description: "截图格式, jpeg文件更小" },
+      user_agent: { type: "string", used_by: "open", description: "自定义User-Agent字符串(反检测)。仅创建新会话时生效" },
+      viewport_width: { type: "number", min: 320, max: 3840, default: 1280, used_by: "open", description: "视窗宽度像素。仅创建新会话时生效" },
+      viewport_height: { type: "number", min: 240, max: 2160, default: 720, used_by: "open", description: "视窗高度像素。仅创建新会话时生效" },
+      block_images: { type: "boolean", default: false, used_by: "open", description: "屏蔽图片资源(加快页面加载)。通过page.route按resourceType过滤" },
+      block_resources: { type: "string", used_by: "open", description: "屏蔽指定资源类型(逗号分隔)。可选: image,stylesheet,font,media,document,script,xhr,fetch,websocket,manifest,other。block_images=true等价于block_resources包含image" },
+      color_scheme: { type: "enum", values: ["light","dark","no-preference"], used_by: "open", description: "浏览器颜色方案(prefers-color-scheme)。仅创建新会话时生效" },
+      locale: { type: "string", used_by: "open", description: "浏览器语言(如zh-CN,en-US,ja-JP)。影响navigator.language和Accept-Language头。仅创建新会话时生效" },
+      timezone: { type: "string", used_by: "open", description: "时区标识符(如Asia/Shanghai,America/New_York,Europe/London)。影响Date对象和Intl API。仅创建新会话时生效" },
+      extra_headers: { type: "string", used_by: "open", description: "额外HTTP请求头(JSON字符串)。如设置{\"X-API-Key\":\"abc123\"}。通过setExtraHTTPHeaders设置，对所有请求生效" },
+      is_mobile: { type: "boolean", default: false, used_by: "open", description: "移动设备模式。自动启用触摸(hasTouch=true)和isMobile=true。影响viewport meta标签和媒体查询。仅创建新会话时生效" },
+      has_touch: { type: "boolean", default: false, used_by: "open", description: "启用触摸事件支持。独立于is_mobile可单独设置。仅创建新会话时生效" },
+      geolocation: { type: "string", used_by: "open", description: "地理位置(纬度,经度格式，如39.9,116.4)。设置后navigator.geolocation返回此坐标。仅创建新会话时生效" },
+      offline: { type: "boolean", default: false, used_by: "open", description: "离线模式。浏览器不发送任何网络请求。仅创建新会话时生效" },
+      device_scale_factor: { type: "number", min: 0.5, max: 4, default: 1, used_by: "open", description: "设备缩放因子(DPR)。如2=Retina屏, 3=高密度屏。影响CSS像素和物理像素比例。仅创建新会话时生效" }
+    },
+    selector_syntax: {
+      "css": "标准CSS选择器。如 #login-btn, .submit, div.card > a, [data-testid='submit'], input[type='email']",
+      "role=": "getByRole选择器(语义化)。格式: role=角色名,name=文本,exact=true。如 role=button,name=登录,exact=true。角色: button/link/heading/checkbox/radio/combobox/textbox/menuitem/tab/dialog/alert 等",
+      "text=": "getByText选择器。如 text=登录。支持子串匹配，区分大小写",
+      "label=": "getByLabel选择器。如 label=用户名。匹配form label关联的input",
+      "placeholder=": "getByPlaceholder选择器。如 placeholder=请输入邮箱",
+      "testid=": "getByTestId选择器。如 testid=submit-btn。匹配[data-testid]",
+      "title=": "getByTitle选择器。如 title=关闭。匹配元素的title属性",
+      "alt=": "getByAltText选择器。如 alt=logo。匹配img的alt属性"
+    },
+    session_management: {
+      description: "浏览器会话基于session参数隔离。不同session各自独立维护一个Browser进程和BrowserContext。同一session复用同一个Browser+Context。",
+      max_sessions: config.browserMaxSessions,
+      eviction: "超过max_sessions时自动关闭最久未活动的会话(LRU)",
+      auto_cleanup: "每5分钟检查，清理超时(30分钟无活动)或已断开的会话",
+      reuse: "已有会话时open的自定义参数(UA/viewport/locale等)不生效，复用之前的Context设置。如需更改需先close再open"
+    },
+    fallback_strategies: {
+      click: "普通click → locator.first().click → locator.first().click(force=true)。force=true跳过actionability检查(可见性/可交互性)",
+      fill: "locator.fill(清空+填充) → click+fill(先点击再填充) → click+pressSequentially(逐字符输入, delay=30ms)。逐字符输入兼容性最好但最慢",
+      select: "selectOption({label: text}) → selectOption({value: text})。先按显示文本匹配，失败后按value属性匹配"
+    },
+    examples: {
+      basic_open: { action: "open", url: "https://example.com" },
+      open_with_network_idle: { action: "open", url: "https://example.com", wait_until: "networkidle", timeout: 60000 },
+      click_submit: { action: "click", selector: "role=button,name=提交", timeout: 10000 },
+      fill_username: { action: "fill", selector: "label=用户名", text: "admin" },
+      type_password: { action: "type", selector: "placeholder=密码", text: "secret123" },
+      scroll_down: { action: "scroll", text: "down" },
+      full_screenshot: { action: "screenshot", full_page: true, screenshot_format: "jpeg" },
+      mobile_emulation: { action: "open", url: "https://m.example.com", is_mobile: true, locale: "zh-CN", viewport_width: 375, viewport_height: 812 },
+      iphone_ua: { action: "open", url: "https://example.com", user_agent: "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15" },
+      block_images_for_speed: { action: "open", url: "https://example.com", block_images: true, block_resources: "stylesheet,font" },
+      dark_mode: { action: "open", url: "https://example.com", color_scheme: "dark" },
+      chinese_locale: { action: "open", url: "https://example.com", locale: "zh-CN", timezone: "Asia/Shanghai" },
+      geo_location: { action: "open", url: "https://maps.example.com", geolocation: "39.9042,116.4074" },
+      custom_headers: { action: "open", url: "https://api.example.com", extra_headers: '{"X-API-Key":"abc123","X-Custom":"value"}' },
+      retina_display: { action: "open", url: "https://example.com", device_scale_factor: 2 },
+      offline_mode: { action: "open", url: "https://example.com", offline: true },
+      extract_main_content: { action: "extract", extract_selector: "#main-content" },
+      execute_js: { action: "execute", execute_js: "document.title" },
+      press_enter: { action: "press", text: "Enter" },
+      get_cookies: { action: "cookies" },
+      set_cookies: { action: "cookies", text: '[{"name":"session","value":"abc","domain":".example.com","path":"/"}]' },
+      export_pdf: { action: "pdf" }
     }
   });
 });
