@@ -28,6 +28,7 @@ from core.s3 import S3Pool
 from core import releases
 from worker import state, persistence, terminal, attack
 from worker.tunnel import TunnelManager
+from worker.mcp import McpManager
 from worker.process.manager import ProcessManager
 from worker.process import api as proc_api
 from worker.boot import deferred_init
