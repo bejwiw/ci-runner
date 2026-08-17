@@ -194,38 +194,85 @@ def _load_inst_cfg():
 
 
 def _auto_update_loop():
-    """自动更新：检测主仓库新版本 → 同步 fork → 重启"""
+    """自动更新：检测主仓库新版本 → 更新前全量备份 → merge-upstream 同步 fork
+    → 验证 fork 指向 → 触发新 run → 本实例退出
+
+    任何一步失败都放弃本次更新并继续运行（下轮重试），不盲冒风险。
+    """
     sha = config.CURRENT_SHA
     if not sha:
         return
-    while True:
-        if state.shutting_down:
-            return
+    updated = False
+    while not state.shutting_down and not updated:
         time.sleep(300)
         try:
-            url = f"{ghapi.API_BASE}/repos/{config.MAIN_REPO}/commits/main"
-            _, d = ghapi.gh_request("GET", url)
+            # 1) 检测主仓库新版本
+            status, d = ghapi.gh_request(
+                "GET", f"{ghapi.API_BASE}/repos/{config.MAIN_REPO}/commits/main")
+            if status != 200 or not d:
+                continue
             latest = d.get("sha", "")
-            if latest and latest != sha:
-                logger.info(f"新版本 {latest[:10]}，同步 fork + 重启")
-                try:
-                    url2 = f"{ghapi.API_BASE}/repos/{config.REPO}/git/refs/heads/main"
-                    ghapi.gh_request("PATCH", url2, token=config.GH_TOKEN,
-                                     data={"sha": latest, "force": True})
-                    time.sleep(3)
-                except Exception as e:
-                    logger.error(f"fork 同步失败: {e}")
-                url3 = (f"{ghapi.API_BASE}/repos/{config.REPO}/actions/workflows/"
-                        f"{config.WORKER_WORKFLOW}/dispatches")
-                status, _ = ghapi.gh_request("POST", url3,
-                    data={"ref": "main", "inputs": {"INSTANCE_ID": config.INSTANCE_ID}})
-                if status in (200, 204):
-                    time.sleep(60)
-                    os._exit(0)
+            if not latest or latest == sha:
+                continue
+            logger.info(f"检测到新版本 {latest[:10]}（当前 {sha[:10]}）")
+
+            # 2) 更新前全量备份 + flush Releases 异步队列
+            try:
+                from worker import persistence, upload_queue
+                if state.proc_mgr:
+                    state.proc_mgr.final_snapshot()
                 else:
-                    logger.error(f"触发失败({status})，继续运行")
+                    persistence.backup_database(state.inst_cfg)
+                    persistence.backup_files(state.inst_cfg)
+                upload_queue.stop_queue(flush=True)
+                logger.info("更新前备份完成，Releases 队列已 flush")
+            except Exception as e:
+                logger.warning(f"更新前备份异常（继续尝试更新）: {e}")
+
+            # 3) merge-upstream 同步 fork（PATCH refs 必坏：fork 无主仓 commit 对象）
+            m_status, m_d = ghapi.gh_request(
+                "POST", f"{ghapi.API_BASE}/repos/{config.REPO}/merge-upstream",
+                data={"branch": "main"}, token=config.GH_TOKEN)
+            if m_status != 200:
+                logger.error(f"fork 同步失败({m_status})，放弃本次更新")
+                continue
+            time.sleep(3)
+
+            # 4) 验证 fork main 已指向新版本（防止用旧代码白重启）
+            v_status, v_d = ghapi.gh_request(
+                "GET", f"{ghapi.API_BASE}/repos/{config.REPO}/git/refs/heads/main",
+                token=config.GH_TOKEN)
+            fork_sha = ""
+            if v_status == 200 and isinstance(v_d, dict):
+                fork_sha = (v_d.get("object") or {}).get("sha", "") or ""
+            if not fork_sha or fork_sha != latest:
+                logger.error(f"fork 验证失败(fork={fork_sha[:10]} latest={latest[:10]})，放弃本次更新")
+                continue
+
+            # 5) 触发新 run（concurrency cancel-in-progress 会接管）
+            d_url = (f"{ghapi.API_BASE}/repos/{config.REPO}/actions/workflows/"
+                     f"{config.WORKER_WORKFLOW}/dispatches")
+            d_status, _ = ghapi.gh_request("POST", d_url,
+                data={"ref": "main", "inputs": {"INSTANCE_ID": config.INSTANCE_ID}},
+                token=config.GH_TOKEN)
+            if d_status not in (200, 204):
+                logger.error(f"触发新 run 失败({d_status})，继续运行")
+                continue
+            logger.info(f"新 run 已触发，{60}s 后本实例退出")
+            time.sleep(60)
+            updated = True
         except Exception as e:
-            logger.error(f"检查失败: {e}")
+            logger.error(f"自动更新异常: {e}")
+            time.sleep(60)
+
+    if updated:
+        # 退出前再 flush 一次（保证待传不丢）
+        try:
+            from worker import upload_queue
+            upload_queue.stop_queue(flush=True)
+        except Exception:
+            pass
+        os._exit(0)
 
 
 def _disk_monitor_loop():
