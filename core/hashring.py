@@ -73,7 +73,7 @@ class HashRing:
             return []
         h = int(hashlib.md5(key.encode()).hexdigest(), 16)
         start = bisect.bisect_right(self._hashes, h)
-        result, seen = set(exclude), []
+        result, seen = [], set(exclude)
         for i in range(len(self._ring)):
             pos = (start + i) % len(self._ring)
             acct = self._ring[pos][1]

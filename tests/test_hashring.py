@@ -82,3 +82,24 @@ def test_add_account_impact():
     # 约 1/11 ≈ 9% 受影响，允许 3-20%
     ratio = moved / total
     assert 0.03 <= ratio <= 0.20, f"受影响比例 {ratio:.1%} 超出预期"
+
+
+def test_get_nearby_excluding():
+    """get_nearby_excluding 跳过排除账号，返回不同账号"""
+    from core.hashring import HashRing
+    ring = HashRing(virtual_nodes=10)
+    ring.build(5)
+    # 排除账号2，结果不应包含2
+    result = ring.get_nearby_excluding("some-key", exclude=[2], count=3)
+    assert len(result) == 3
+    assert 2 not in result
+    assert len(set(result)) == 3  # 不重复
+
+
+def test_get_nearby_excluding_all_excluded():
+    """排除全部账号时返回空"""
+    from core.hashring import HashRing
+    ring = HashRing(virtual_nodes=10)
+    ring.build(3)
+    result = ring.get_nearby_excluding("key", exclude=[1, 2, 3], count=5)
+    assert result == []
