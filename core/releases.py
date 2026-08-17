@@ -334,6 +334,11 @@ def upload_asset_v2(base, data_or_path, token=None, repo=None, ts=None):
     repo = repo or config.REPO
     name = asset_name_v2(base, ts)
     size = len(data_or_path) if isinstance(data_or_path, bytes) else os.path.getsize(data_or_path)
+    # 超限防御：>1.5GB 必须走分片（upload_chunked_v2），单请求会 write timeout（实测）
+    if size > SINGLE_UPLOAD_LIMIT:
+        logger.error(f"upload_asset_v2 拒绝超大文件 {size}B（> {SINGLE_UPLOAD_LIMIT}），必须走 upload_chunked_v2")
+        return {"name": name, "size": size, "status": -1,
+                "ok": False, "attempts": 0, "error": "exceeds_single_limit"}
 
     def load():
         if isinstance(data_or_path, bytes):
