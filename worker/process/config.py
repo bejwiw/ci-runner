@@ -138,7 +138,8 @@ def scan_configs():
         cfg.setdefault("env", {})
         cfg.setdefault("tunnels", [])
         cfg["source_pid"] = 0
-        cfg["saved_at"] = time.time()
+        # 只在没有时才设置，避免每次扫描都覆盖（列表展示会变成扫描时间）
+        cfg.setdefault("saved_at", time.time())
         configs[name] = cfg
     return configs
 

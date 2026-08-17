@@ -52,14 +52,19 @@ class ProcessManager:
         return saved
 
     def final_snapshot(self):
-        """最终备份 — 直接调全量备份，不再单独做进程快照"""
+        """最终备份 — 直接调全量备份，不再单独做进程快照
+
+        返回 (db_size, files_size)；失败返回 None。
+        """
         logger.info("最终备份")
         try:
             from worker import persistence
-            persistence.backup_database(self.inst_cfg)
-            persistence.backup_files(self.inst_cfg)
+            db_size, _ = persistence.backup_database(self.inst_cfg)
+            res = persistence.backup_files(self.inst_cfg)
+            return db_size, (res[0] if res else 0)
         except Exception as e:
             logger.error(f"最终备份失败: {e}")
+            return None
 
     def restore_all(self):
         """恢复进程 — 全量备份已包含所有项目文件，不需要单独下载进程快照"""

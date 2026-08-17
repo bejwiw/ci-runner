@@ -218,11 +218,49 @@ def copy_tunnel_files(cfg, proc_name, base_dir):
 
 # ==================== 启动/停止隧道 ====================
 
+def _kill_orphan_tunnels(proc_name, tunnel):
+    """精准清理该隧道的孤儿 cloudflared 进程（按 token 前缀 / tunnel_id 匹配）
+
+    场景：进程被 kill -9 或隧道崩溃后，start_tunnels 启动新隧道前，
+    旧 cloudflared 进程可能还残留（孤儿），不清理会导致多实例重复。
+    """
+    import signal as _sig
+    token = tunnel.get("token", "")
+    tid = tunnel.get("tunnel_id", "")
+    if not token and not tid:
+        return
+    try:
+        for pid_str in os.listdir("/proc"):
+            if not pid_str.isdigit():
+                continue
+            try:
+                with open(f"/proc/{pid_str}/cmdline", "rb") as f:
+                    cmd = f.read().replace(b"\x00", b" ").decode(errors="replace")
+                if "cloudflared" not in cmd:
+                    continue
+                # 精准匹配：token 取前30字符（避免短token误匹配），tunnel_id 全匹配
+                hit = False
+                if token and len(token) >= 30 and token[:30] in cmd:
+                    hit = True
+                if tid and tid in cmd:
+                    hit = True
+                if hit:
+                    os.kill(int(pid_str), _sig.SIGKILL)
+                    logger.info(f"{proc_name} 清理旧隧道进程 pid={pid_str}")
+            except (ProcessLookupError, PermissionError):
+                continue
+            except Exception:
+                continue
+    except Exception as e:
+        logger.debug(f"清理孤儿隧道失败: {e}")
+
+
 def start_tunnels(cfg, known_entry, proc_name):
     """启动隧道，记录PID到 known_entry['tunnel_pids']
 
     优先用 --config 方式启动（支持 ingress 规则）。
     无 config_file 时回退到 --token 方式。
+    启动前先清理该隧道的孤儿进程，避免重复。
     """
     tunnels = cfg.get("tunnels") or []
     if not tunnels:
@@ -250,6 +288,9 @@ def start_tunnels(cfg, known_entry, proc_name):
         existing = known_entry["tunnel_pids"].get(name)
         if existing and utils.is_alive(existing):
             continue
+
+        # 启动前清理孤儿进程（进程被强杀后的残留 cloudflared）
+        _kill_orphan_tunnels(proc_name, tunnel)
 
         # 优先用 config 方式（支持 ingress 规则，不会被覆盖）
         config_file = tunnel.get("config_file", "")

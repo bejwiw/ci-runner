@@ -139,26 +139,35 @@ def delete_asset(name, token=None, repo=None):
 
 
 def upload_chunked(name, data_bytes, token=None, repo=None):
-    """加密分片上传。小数据走单文件，大数据自动分片并发。"""
+    """加密分片上传。小数据走单文件，大数据自动分片并发。
+
+    返回 (size, ok_assets)：ok_assets 表示成功上传的资产数，
+    0 表示全部失败（调用方可判断成败）。
+    """
     tok = token or config.GH_TOKEN
     repo = repo or config.REPO
+
+    def _ok(status):
+        return status in (200, 201)
+
     if len(data_bytes) <= CHUNK_SIZE:
         size, status = upload_asset(name, data_bytes, token=tok, repo=repo)
-        return size, 1
+        return size, 1 if _ok(status) else 0
 
     parts = (len(data_bytes) + CHUNK_SIZE - 1) // CHUNK_SIZE
     chunks = [(i, data_bytes[i * CHUNK_SIZE:(i + 1) * CHUNK_SIZE]) for i in range(parts)]
 
     def _upload(args):
         i, chunk = args
-        upload_asset(f"{name}.part{i}", chunk, token=tok, repo=repo)
-        return i, len(chunk)
+        _, status = upload_asset(f"{name}.part{i}", chunk, token=tok, repo=repo)
+        return 1 if _ok(status) else 0
 
     with ThreadPoolExecutor(max_workers=CHUNK_CONCURRENCY) as ex:
-        list(ex.map(_upload, chunks))
-    upload_asset(f"{name}.manifest",
+        ok_chunks = list(ex.map(_upload, chunks))
+    _, m_status = upload_asset(f"{name}.manifest",
                  json.dumps({"parts": parts}).encode(), token=tok, repo=repo)
-    return len(data_bytes), parts
+    ok_assets = sum(ok_chunks) + (1 if _ok(m_status) else 0)
+    return len(data_bytes), ok_assets
 
 
 def download_chunked(name, token=None, repo=None):

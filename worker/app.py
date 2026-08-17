@@ -275,13 +275,17 @@ def graceful_shutdown():
         _t.sleep(1)  # 确保响应已发送
         logger.warning("收到优雅关闭请求，开始备份")
         try:
-            db_size, _ = persistence.backup_database(state.inst_cfg)
-            res = persistence.backup_files(state.inst_cfg)
             if state.proc_mgr:
-                state.proc_mgr.final_snapshot()
-            _size = int(db_size or 0) + int((res[0] if res else 0))
-            persistence.record_backup("pre-shutdown", _size,
-                f"shutdown: db={db_size}B files={res[0] if res else 0}MB", 0, 0)
+                result = state.proc_mgr.final_snapshot()
+            else:
+                _dbs, _ = persistence.backup_database(state.inst_cfg)
+                _res = persistence.backup_files(state.inst_cfg)
+                result = (_dbs, _res[0] if _res else 0)
+            if result:
+                db_size, files_size = result
+                _size = int(db_size or 0) + int(files_size or 0)
+                persistence.record_backup("pre-shutdown", _size,
+                    f"shutdown: db={db_size}B files={files_size/1048576:.1f}MB", 0, 0)
             logger.info("备份完成")
         except Exception as e:
             logger.error(f"备份失败: {e}")
@@ -408,10 +412,12 @@ def ws_disconnect():
 def _signal_handler(signum, frame):
     logger.warning(f"信号 {signum}，最终快照")
     try:
+        # final_snapshot 内部已含 backup_database + backup_files，避免重复备份
         if state.proc_mgr:
             state.proc_mgr.final_snapshot()
-        persistence.backup_database(state.inst_cfg)
-        persistence.backup_files(state.inst_cfg)
+        else:
+            persistence.backup_database(state.inst_cfg)
+            persistence.backup_files(state.inst_cfg)
         if state.mcp_mgr:
             state.mcp_mgr.stop()
     except Exception as e:

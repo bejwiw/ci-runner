@@ -172,9 +172,12 @@ def backup_database(inst_cfg=None):
             logger.info(f"数据库 → S3 ({len(data)} 字节)")
             return len(data), 1
     # Releases（upload_chunked内部自动加密）
-    size, parts = releases.upload_chunked(db_asset, data)
-    logger.info(f"数据库 → Releases ({size} 字节, {parts} 分片)")
-    return size, parts
+    size, ok_assets = releases.upload_chunked(db_asset, data)
+    if ok_assets > 0:
+        logger.info(f"数据库 → Releases ({size} 字节, {ok_assets}资产成功)")
+    else:
+        logger.error(f"数据库 → Releases 上传失败! ({size} 字节)")
+    return size, ok_assets
 
 
 def backup_files(inst_cfg=None):
@@ -198,8 +201,11 @@ def backup_files(inst_cfg=None):
     if file_size < 50 * 1024 * 1024:
         with open(tmp, "rb") as f:
             data = f.read()
-        size, parts = releases.upload_chunked(files_asset, data)
-        logger.info(f"文件 → Releases ({size} 字节)")
+        size, ok_assets = releases.upload_chunked(files_asset, data)
+        if ok_assets > 0:
+            logger.info(f"文件 → Releases ({size} 字节, {ok_assets}资产成功)")
+        else:
+            logger.error(f"文件 → Releases 上传失败! ({size} 字节)")
     else:
         logger.info(f"文件 >=50MB, 跳过Releases(S3分片存储)")
         size, parts = file_size, 1
