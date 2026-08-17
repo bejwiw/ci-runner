@@ -206,6 +206,7 @@ def backup_files(inst_cfg=None):
             logger.info(f"文件 → Releases ({size} 字节, {ok_assets}资产成功)")
         else:
             logger.error(f"文件 → Releases 上传失败! ({size} 字节)")
+        parts = ok_assets
     else:
         logger.info(f"文件 >=50MB, 跳过Releases(S3分片存储)")
         size, parts = file_size, 1
