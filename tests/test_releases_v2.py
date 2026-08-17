@@ -237,3 +237,28 @@ class TestChunkedDownloadV2:
 
         out = rel.download_latest("inst-x.files")
         assert out == b"DATA"
+
+
+def test_upload_invalidates_cache(monkeypatch):
+    """上传成功后 asset 缓存失效（spy 验证）"""
+    import core.releases as rel
+    import core.ghapi as ghapi_mod
+
+    count = {"n": 0}
+    real_invalidate = rel._invalidate_release
+
+    def spy_invalidate(*a, **kw):
+        count["n"] += 1
+        return real_invalidate(*a, **kw)
+
+    monkeypatch.setattr(rel, "_invalidate_release", spy_invalidate)
+    # 简化上传：直接 mock gh_request 201 + encrypt 恒等
+    monkeypatch.setattr(ghapi_mod, "gh_request",
+                        lambda *a, **kw: (201, {}))
+    monkeypatch.setattr(rel, "crypto",
+                        type("C", (), {"encrypt_bytes": staticmethod(lambda d: d)})())
+    monkeypatch.setattr(rel, "ensure_release", lambda **kw: 1)
+
+    r = rel.upload_asset_v2("inst-x.db", b"data", token="t", repo="r")
+    assert r["ok"] is True, r
+    assert count["n"] == 1

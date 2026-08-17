@@ -164,8 +164,12 @@ def upload_asset(name, data_bytes, token=None, repo=None):
     tok = token or config.GH_TOKEN
     repo = repo or config.REPO
     rel_id = ensure_release(token=tok, repo=repo)
-    rel = get_release(token=tok, repo=repo)
-    old = _find_asset(rel, name)
+    # 用完整列表找旧资产（get_release 内嵌只有前30，资产多时删不掉→422）
+    old = None
+    for a in list_assets(token=tok, repo=repo, ttl=ASSET_LIST_CACHE_TTL):
+        if a.get("name") == name:
+            old = a
+            break
     if old:
         ghapi.gh_request("DELETE",
                          f"{ghapi.API_BASE}/repos/{repo}/releases/assets/{old['id']}",
@@ -177,33 +181,21 @@ def upload_asset(name, data_bytes, token=None, repo=None):
                                  timeout=180)
     if status in (200, 201):
         logger.info(f"上传 {name} OK ({len(data_bytes)} bytes) -> {repo}")
+        _invalidate_release(tok, repo)
     else:
         logger.error(f"上传 {name} 失败({status}) -> {repo}")
     return len(data_bytes), status
 
 
 def download_asset(name, token=None, repo=None):
+    """v1 下载（修：不再依赖 get_release 内嵌列表，资产多时截断找不到）"""
     name = name.replace("/", ".")
     tok = token or config.GH_TOKEN
     repo = repo or config.REPO
     for attempt in range(MAX_RETRIES):
-        rel = get_release(token=tok, repo=repo)
-        a = _find_asset(rel, name)
-        if not a:
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(RETRY_DELAYS[attempt])
-                continue
-            return None
-        status, blob = ghapi.gh_request(
-            "GET", f"{ghapi.API_BASE}/repos/{repo}/releases/assets/{a['id']}",
-            token=tok, raw=True,
-            headers={"Accept": "application/octet-stream"}, timeout=120)
-        if status == 200 and blob:
-            try:
-                return crypto.decrypt_bytes(blob)
-            except Exception as e:
-                logger.error(f"解密 {name} 失败: {e}")
-                return None
+        blob = _download_asset_by_name(name, token=tok, repo=repo)
+        if blob is not None:
+            return blob
         if attempt < MAX_RETRIES - 1:
             time.sleep(RETRY_DELAYS[attempt])
     return None
@@ -361,6 +353,7 @@ def upload_asset_v2(base, data_or_path, token=None, repo=None, ts=None):
             last_status = status
             if status in (200, 201):
                 logger.info(f"v2上传 {name} OK ({size} bytes, 尝试{attempts}次)")
+                _invalidate_release(tok, repo)  # 清 asset 缓存，防下载命中旧列表
                 return {"name": name, "size": size, "status": status,
                         "ok": True, "attempts": attempts}
             logger.warning(f"v2上传 {name} -> {status} (尝试{attempt+1}/{V2_MAX_RETRIES})")
@@ -415,6 +408,35 @@ def upload_chunked_v2(base, path, token=None, repo=None):
     return {"ok": ok_parts == parts and mr.get("ok"),
             "name": name, "parts": parts, "ok_parts": ok_parts + (1 if mr.get("ok") else 0),
             "size": total, "statuses": [r.get("status") for r in results] + [mr.get("status")]}
+
+
+def _download_asset_by_name(name, token=None, repo=None):
+    """按名字下载资产：CDN 直链优先（0配额）→ 完整列表找 id → API 降级。
+
+    不依赖 get_release 的内嵌 assets（仅前30个，资产多时会截断找不到）。
+    """
+    tok = token or config.GH_TOKEN
+    repo = repo or config.REPO
+    # 1. CDN 直链（0 配额）
+    blob = download_cdn(name, token=tok, repo=repo)
+    if blob is not None:
+        return blob
+    # 2. 完整列表查找 id → API 下载（1 配额）
+    assets = list_assets(token=tok, repo=repo, ttl=ASSET_LIST_CACHE_TTL)
+    for a in assets:
+        if a.get("name") == name:
+            status, raw = ghapi.gh_request(
+                "GET", f"{ghapi.API_BASE}/repos/{repo}/releases/assets/{a['id']}",
+                token=tok, raw=True,
+                headers={"Accept": "application/octet-stream"}, timeout=120)
+            if status == 200 and raw:
+                try:
+                    return crypto.decrypt_bytes(raw)
+                except Exception as e:
+                    logger.error(f"解密 {name} 失败: {e}")
+            return None
+    logger.warning(f"资产不存在: {name}")
+    return None
 
 
 # ==================== v2：CDN 下载 ====================
@@ -514,10 +536,8 @@ def download_chunked_v2(base, token=None, repo=None, ts=None):
         return None
     m_name = m_asset["name"]
     m_ts = int(m_name[len(base) + len(".manifest."):-4])
-    # 2. 下载 manifest（CDN → API）
-    blob = download_cdn(m_name, token=tok, repo=repo)
-    if blob is None:
-        blob = download_asset(m_name, token=tok, repo=repo)
+    # 2. 下载 manifest（CDN 直链 → 完整查找 API）
+    blob = _download_asset_by_name(m_name, token=tok, repo=repo)
     if blob is None:
         logger.error(f"分片 manifest {m_name} 下载失败")
         return None
@@ -534,10 +554,7 @@ def download_chunked_v2(base, token=None, repo=None, ts=None):
 
     def dl(i):
         pname = asset_name_v2(f"{base}.part{i}", m_ts)
-        data = download_cdn(pname, token=tok, repo=repo)
-        if data is None:
-            data = download_asset(pname, token=tok, repo=repo)
-        results[i] = data
+        results[i] = _download_asset_by_name(pname, token=tok, repo=repo)
 
     with ThreadPoolExecutor(max_workers=conc) as ex:
         list(ex.map(dl, range(parts)))

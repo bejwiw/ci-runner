@@ -16,3 +16,5 @@ __pycache__/
 venv/
 # 系统
 .DS_Store
+# 临时脚本不入库（本地保留）
+scripts/
