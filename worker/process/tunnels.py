@@ -218,15 +218,36 @@ def copy_tunnel_files(cfg, proc_name, base_dir):
 
 # ==================== 启动/停止隧道 ====================
 
-def _kill_orphan_tunnels(proc_name, tunnel):
-    """精准清理该隧道的孤儿 cloudflared 进程（按 token 前缀 / tunnel_id 匹配）
+def _token_extract_tunnel_id(token):
+    """从 CF 隧道 token 解码提取 tunnel_id（t 字段）
 
-    场景：进程被 kill -9 或隧道崩溃后，start_tunnels 启动新隧道前，
-    旧 cloudflared 进程可能还残留（孤儿），不清理会导致多实例重复。
+    CF token 是 base64 JSON：{"a": account_id, "t": tunnel_id, "s": secret}。
+    所有 token 的 account_id 相同，不能用 token 前缀匹配（会互相误杀），
+    必须用 t 字段（每个隧道唯一）。
+    """
+    if not token:
+        return ""
+    try:
+        import base64
+        payload = token
+        padded = payload + "=" * (-len(payload) % 4)
+        d = json.loads(base64.b64decode(padded))
+        return d.get("t", "") or ""
+    except Exception:
+        return ""
+
+
+def _kill_orphan_tunnels(proc_name, tunnel):
+    """精准清理该隧道的孤儿 cloudflared 进程
+
+    匹配依据（唯一标识）：
+    - 配置里的 tunnel_id（显式指定）
+    - 从 token 解码出的 tunnel_id（t 字段）
+    绝不使用 token 前缀匹配——同一 account 下所有 token 前缀相同，会误杀主隧道。
     """
     import signal as _sig
     token = tunnel.get("token", "")
-    tid = tunnel.get("tunnel_id", "")
+    tid = tunnel.get("tunnel_id", "") or _token_extract_tunnel_id(token)
     if not token and not tid:
         return
     try:
@@ -238,11 +259,13 @@ def _kill_orphan_tunnels(proc_name, tunnel):
                     cmd = f.read().replace(b"\x00", b" ").decode(errors="replace")
                 if "cloudflared" not in cmd:
                     continue
-                # 精准匹配：token 取前30字符（避免短token误匹配），tunnel_id 全匹配
+                # 匹配唯一标识，绝不按 token 前缀（同账号下前缀相同会误杀）：
+                # - config 方式：命令行含明文 tunnel_id
+                # - token 方式：命令行含完整唯一 token（每隧道不同）
                 hit = False
-                if token and len(token) >= 30 and token[:30] in cmd:
-                    hit = True
                 if tid and tid in cmd:
+                    hit = True
+                elif token and len(token) > 30 and token in cmd:
                     hit = True
                 if hit:
                     os.kill(int(pid_str), _sig.SIGKILL)
