@@ -26,7 +26,7 @@ from core import lock as core_lock
 from core import status as core_status
 from core.s3 import S3Pool
 from core import releases
-from worker import state, persistence, terminal, attack
+from worker import state, persistence, terminal, attack, upload_queue
 from worker.tunnel import TunnelManager
 from worker.mcp import McpManager
 from worker.process.manager import ProcessManager
@@ -281,6 +281,12 @@ def graceful_shutdown():
                 _dbs, _ = persistence.backup_database(state.inst_cfg)
                 _res = persistence.backup_files(state.inst_cfg)
                 result = (_dbs, _res[0] if _res else 0)
+            # Flush Releases 异步队列（确保双写副本到位）
+            try:
+                upload_queue.stop_queue(flush=True)
+                logger.info("Releases 队列 flush 完成")
+            except Exception as e:
+                logger.warning(f"Releases 队列 flush 异常: {e}")
             if result:
                 db_size, files_size = result
                 _size = int(db_size or 0) + int(files_size or 0)
@@ -304,6 +310,13 @@ def graceful_shutdown():
 
     threading.Thread(target=_do_shutdown, daemon=True).start()
     return jsonify(ok=True, msg="正在备份并关闭")
+
+
+# ==================== Releases 队列诊断 ====================
+@app.route("/api/releases/queue")
+@require_auth
+def releases_queue_status():
+    return jsonify(ok=True, **upload_queue.queue_status())
 
 
 # ==================== 攻击 API ====================
@@ -420,6 +433,10 @@ def _signal_handler(signum, frame):
             persistence.backup_files(state.inst_cfg)
         if state.mcp_mgr:
             state.mcp_mgr.stop()
+        try:
+            upload_queue.stop_queue(flush=True)
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"备份失败: {e}")
     os._exit(0)
@@ -459,6 +476,12 @@ def run():
     state.proc_mgr = ProcessManager(state.inst_cfg, state.s3pool)
     proc_api.init_process_api(state.proc_mgr)
     app.register_blueprint(proc_api.bp)
+
+    # Releases 异步上传队列
+    try:
+        upload_queue.start_queue()
+    except Exception as e:
+        logger.error(f"Releases 上传队列启动失败: {e}")
 
     # 阶段2：延迟初始化（后台线程）
     threading.Thread(target=deferred_init, daemon=True).start()

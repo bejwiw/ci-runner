@@ -13,12 +13,14 @@ import time
 import sqlite3
 import threading
 import subprocess
+import shutil
 import datetime
 
 import config
 import log
 from core import crypto, releases
 from core.s3 import S3Pool
+from worker import upload_queue
 
 TMP_DIR = "/tmp/ghbox_backup"
 
@@ -111,6 +113,7 @@ def load_or_create(inst_cfg):
     status_msg = "新建初始数据库"
 
     # 数据库
+    db_base = db_asset[:-4] if db_asset.endswith(".enc") else db_asset
     db_data = None
     if _s3pool and _s3pool.is_ready():
         try:
@@ -118,7 +121,8 @@ def load_or_create(inst_cfg):
         except Exception as e:
             logger.warning(f"S3 数据库读取失败: {e}")
     if db_data is None:
-        db_data = releases.download_chunked(db_asset)
+        # Releases：CDN 直链优先（0配额）→ API 降级；兼容旧固定名
+        db_data = releases.download_latest(db_base, token=config.GH_TOKEN, repo=config.REPO)
     if db_data:
         with open(config.DB_FILE, "wb") as f:
             f.write(db_data)
@@ -128,6 +132,7 @@ def load_or_create(inst_cfg):
         create_new_db()
 
     # 文件
+    files_base = files_asset[:-4] if files_asset.endswith(".enc") else files_asset
     tmp_files = os.path.join(TMP_DIR, "restore_files.tar.gz")
     os.makedirs(TMP_DIR, exist_ok=True)
     files_ok = False
@@ -137,7 +142,7 @@ def load_or_create(inst_cfg):
         except Exception as e:
             logger.warning(f"S3 文件读取失败: {e}")
     if not files_ok:
-        files_data = releases.download_chunked(files_asset)
+        files_data = releases.download_latest(files_base, token=config.GH_TOKEN, repo=config.REPO)
         if files_data:
             with open(tmp_files, "wb") as f:
                 f.write(files_data)
@@ -166,18 +171,29 @@ def backup_database(inst_cfg=None):
             logger.debug(f"S3操作失败: {e}")
     with open(config.DB_FILE, "rb") as f:
         data = f.read()
-    # S3（不加密，S3本身私有访问）
-    if _s3pool and _s3pool.is_ready():
-        if _s3pool.put(db_key, data):
-            logger.info(f"数据库 → S3 ({len(data)} 字节)")
+    # S3 主存储（同步）；S3 成功 → Releases 异步冗余双写
+    db_base = db_asset[:-4] if db_asset.endswith(".enc") else db_asset  # 去掉 .enc
+    if _s3pool and _s3pool.is_ready() and _s3pool.put(db_key, data):
+        logger.info(f"数据库 → S3 ({len(data)} 字节)")
+        try:
+            if upload_queue.get_queue().enqueue("db", db_base, data=data,
+                                                inst_id=inst_id):
+                logger.info(f"数据库 → Releases 已入队异步 ({len(data)} 字节)")
+            else:
+                logger.warning("数据库 → Releases 入队被拒（队列满/配额低），跳过双写")
+        except Exception as e:
+            logger.warning(f"数据库 → Releases 入队异常: {e}")
+        return len(data), 1
+    # S3 不可用 → Releases 同步兜底（保证有副本）
+    try:
+        r = releases.upload_asset_v2(db_base, data)
+        if r.get("ok"):
+            logger.info(f"数据库 → Releases 同步兜底成功 ({len(data)} 字节)")
             return len(data), 1
-    # Releases（upload_chunked内部自动加密）
-    size, ok_assets = releases.upload_chunked(db_asset, data)
-    if ok_assets > 0:
-        logger.info(f"数据库 → Releases ({size} 字节, {ok_assets}资产成功)")
-    else:
-        logger.error(f"数据库 → Releases 上传失败! ({size} 字节)")
-    return size, ok_assets
+        logger.error(f"数据库 → Releases 兜底失败: {r.get('status')}")
+    except Exception as e:
+        logger.error(f"数据库 → Releases 兜底异常: {e}")
+    return len(data), 0
 
 
 def backup_files(inst_cfg=None):
@@ -197,25 +213,54 @@ def backup_files(inst_cfg=None):
             logger.info(f"文件 → S3 ({file_size} 字节)")
         else:
             logger.error(f"文件 → S3 失败! ({file_size} 字节)")
-    # Releases（<50MB双写，>=50MB跳过避免GitHub API超限）
-    if file_size < 50 * 1024 * 1024:
-        with open(tmp, "rb") as f:
-            data = f.read()
-        size, ok_assets = releases.upload_chunked(files_asset, data)
-        if ok_assets > 0:
-            logger.info(f"文件 → Releases ({size} 字节, {ok_assets}资产成功)")
+    # Releases 异步双写（版本化命名；S3 失败时同步兜底）
+    files_base = files_asset[:-4] if files_asset.endswith(".enc") else files_asset
+    s3_ok = False
+    if _s3pool and _s3pool.is_ready():
+        s3_ok = _s3pool.put_file(files_key, tmp)
+        if s3_ok:
+            logger.info(f"文件 → S3 ({file_size} 字节)")
         else:
-            logger.error(f"文件 → Releases 上传失败! ({size} 字节)")
-        parts = ok_assets
+            logger.error(f"文件 → S3 失败! ({file_size} 字节)")
+    if s3_ok:
+        # S3 成功 → 入队异步（文件移到队列目录，worker 传完自动删）
+        try:
+            q = upload_queue.get_queue()
+            staged = os.path.join(upload_queue.QUEUE_DIR, f"files-{inst_id}-{int(time.time())}.tar.gz")
+            os.makedirs(upload_queue.QUEUE_DIR, exist_ok=True)
+            if os.path.exists(staged):
+                os.remove(staged)
+            shutil.move(tmp, staged)
+            if q.enqueue("files", files_base, path=staged, inst_id=inst_id):
+                logger.info(f"文件 → Releases 已入队异步 ({file_size} 字节)")
+                return file_size, 1
+            logger.warning("文件 → Releases 入队被拒，清理暂存")
+            try:
+                os.remove(staged)
+            except Exception:
+                pass
+            return file_size, 1
+        except Exception as e:
+            logger.warning(f"文件 → Releases 入队异常: {e}")
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+            return file_size, 1
     else:
-        logger.info(f"文件 >=50MB, 跳过Releases(S3分片存储)")
-        size, parts = file_size, 1
-    # 清理临时文件
-    try:
-        os.remove(tmp)
-    except Exception as e:
-        logger.debug(f"操作失败: {e}")
-    return size, parts
+        # S3 失败 → Releases 同步兜底
+        try:
+            r = releases.upload_asset_v2(files_base, tmp)
+            ok = r.get("ok", False)
+            logger.info(f"文件 → Releases 同步兜底 {'成功' if ok else '失败'} ({file_size} 字节)")
+        except Exception as e:
+            logger.error(f"文件 → Releases 兜底异常: {e}")
+            ok = False
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+        return file_size, 1 if ok else 0
 
 
 def backup_files_to_disk():
