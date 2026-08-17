@@ -202,15 +202,17 @@ def download_asset(name, token=None, repo=None):
 
 
 def delete_asset(name, token=None, repo=None):
+    """按名字删除资产（完整列表查找，不依赖 get_release 内嵌前30）"""
     name = name.replace("/", ".")
     tok = token or config.GH_TOKEN
     repo = repo or config.REPO
-    rel = get_release(token=tok, repo=repo)
-    a = _find_asset(rel, name)
-    if a:
-        ghapi.gh_request("DELETE",
-                         f"{ghapi.API_BASE}/repos/{repo}/releases/assets/{a['id']}",
-                         token=tok, timeout=30)
+    for a in list_assets(token=tok, repo=repo, ttl=ASSET_LIST_CACHE_TTL):
+        if a.get("name") == name:
+            ghapi.gh_request("DELETE",
+                             f"{ghapi.API_BASE}/repos/{repo}/releases/assets/{a['id']}",
+                             token=tok, timeout=30)
+            return True
+    return False
 
 
 def upload_chunked(name, data_bytes, token=None, repo=None):

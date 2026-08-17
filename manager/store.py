@@ -20,6 +20,11 @@ logger = log.setup_logger("store")
 _lock = threading.RLock()
 _s3pool = None
 
+# Releases 冗余保存节流（S3 每次存，Releases 低频刷，防配额耗尽）
+RELEASES_FLUSH_INTERVAL = 300  # 至少间隔秒数
+_last_releases_save = [0.0]
+_releases_dirty = [False]
+
 # ==================== 内存数据 ====================
 _instances = []
 _accounts = []
@@ -216,12 +221,47 @@ def save_instances(instances):
                 s3_ok = _s3_put_json("meta/instances.json", instances)
             except Exception as e:
                 logger.warning(f"S3 保存失败: {e}")
-        try:
-            releases.save_json_enc("instances.json.enc", instances)
-        except Exception as e:
-            if not s3_ok:
-                logger.error(f"S3 和 Releases 都失败: {e}")
+        _releases_save_throttled("instances.json.enc", instances, force=False)
+        if not s3_ok and not _releases_dirty[0]:
+            logger.error("S3 保存失败且 Releases 节流中")
     return True
+
+
+def _releases_save_throttled(name, obj, force=False):
+    """Releases 冗余保存：节流（>=300s 或 force）才真上传；否则只标记脏。
+
+    高频调用（如 instance_report 60s 更新 run_id）只写 S3（不费 GitHub 配额），
+    Releases 冗余低频刷。
+    """
+    now = time.time()
+    with _lock:
+        _releases_dirty[0] = True
+        if not force and now - _last_releases_save[0] < RELEASES_FLUSH_INTERVAL:
+            return False
+        _last_releases_save[0] = now
+        _releases_dirty[0] = False
+    try:
+        releases.save_json_enc(name, obj)
+        return True
+    except Exception as e:
+        logger.warning(f"Releases 保存失败 {name}: {e}")
+        with _lock:
+            _releases_dirty[0] = True  # 失败重标记，等后台 flush
+        return False
+
+
+def flush_releases_dirty():
+    """后台调用：把脏标记的 instances.json 补刷到 Releases。"""
+    with _lock:
+        if not _releases_dirty[0]:
+            return False
+    try:
+        with _lock:
+            insts = list(_instances)
+        return _releases_save_throttled("instances.json.enc", insts, force=True)
+    except Exception as e:
+        logger.warning(f"flush_releases_dirty 失败: {e}")
+        return False
 
 
 def save_accounts(accounts):

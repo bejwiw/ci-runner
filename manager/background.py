@@ -53,6 +53,11 @@ def _heal_loop():
                     state.s3pool.save_state()
                 except Exception as e:
                     logger.warning(f"S3 状态持久化失败: {e}")
+            # Releases 冗余脏数据补刷（节流兜底）
+            try:
+                store.flush_releases_dirty()
+            except Exception as e:
+                logger.debug(f"flush_releases_dirty: {e}")
             # 实例清单自愈
             insts = store.list_instances()
             if not insts:
@@ -77,10 +82,8 @@ def _self_heal_instances():
         if not token:
             continue
         try:
-            rel = releases.get_release(token=token, repo=repo)
-            if not rel:
-                continue
-            for asset in rel.get("assets", []):
+            assets = releases.list_assets(token=token, repo=repo, ttl=0)
+            for asset in assets:
                 name = asset.get("name", "")
                 if name.startswith("inst-") and name.endswith(".json.enc"):
                     blob = releases.download_asset(name, token=token, repo=repo)
