@@ -44,7 +44,7 @@ class ReleasesUploadQueue:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._stats = {
-            "enqueued": 0, "ok": 0, "failed": 0, "skipped": 0,
+            "enqueued": 0, "ok_uploads": 0, "failed": 0, "skipped": 0,
             "dlq": 0, "processing": 0, "pending": 0,
             "last_error": "", "paused": False,
         }
@@ -137,7 +137,7 @@ class ReleasesUploadQueue:
             result = self._upload_with_retry(task)
             if result.get("ok"):
                 with self._lock:
-                    self._stats["ok"] += 1
+                    self._stats["ok_uploads"] += 1
                 logger.info(f"[队列] {task['base']} 上传成功 "
                             f"({result.get('size', 0)}B, {time.time()-t0:.1f}s)")
             else:
@@ -307,4 +307,4 @@ def stop_queue(flush=True):
 def queue_status():
     if _queue_instance:
         return _queue_instance.status()
-    return {"running": False, "enqueued": 0, "ok": 0, "failed": 0, "pending": 0}
+    return {"running": False, "enqueued": 0, "ok_uploads": 0, "failed": 0, "pending": 0}

@@ -132,7 +132,7 @@ class TestUploadQueue:
         assert q.flush(timeout=10) is True
         q.stop(flush=False)
         assert uploaded and uploaded[0][0] == "inst-x.db"  # 拼ts在upload内部
-        assert q.status()["ok"] >= 1
+        assert q.status()["ok_uploads"] >= 1
 
     def test_queue_full_skip(self, monkeypatch, tmp_path):
         """队列满时拒绝并跳过"""
@@ -182,9 +182,9 @@ class TestUploadQueue:
         assert q.flush(timeout=10) is True
         q.stop(flush=False)
         assert uploaded, "pending 任务应被恢复并上传"
-        assert q.status()["ok"] >= 1
+        assert q.status()["ok_uploads"] >= 1
         # 临时文件应被清理
-        assert not os.path.exists(f) or q.status()["ok"] >= 1
+        assert not os.path.exists(f) or q.status()["ok_uploads"] >= 1
 
 class TestChunkedDownloadV2:
     def test_download_chunked_v2(self, monkeypatch):

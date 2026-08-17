@@ -316,7 +316,9 @@ def graceful_shutdown():
 @app.route("/api/releases/queue")
 @require_auth
 def releases_queue_status():
-    return jsonify(ok=True, **upload_queue.queue_status())
+    st = upload_queue.queue_status()
+    st.pop("ok", None)  # 避免与 jsonify 的 ok 冲突
+    return jsonify(ok=True, **st)
 
 
 # ==================== 攻击 API ====================
