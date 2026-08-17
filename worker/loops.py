@@ -31,6 +31,7 @@ def start_loops():
     threading.Thread(target=_worker_pre_wake, daemon=True).start()
     threading.Thread(target=_auto_update_loop, daemon=True).start()
     threading.Thread(target=_disk_monitor_loop, daemon=True).start()
+    threading.Thread(target=_releases_cleanup_loop, daemon=True).start()
     logger.info("后台循环已启动")
 
 
@@ -255,3 +256,34 @@ def _disk_monitor_loop():
                 logger.warning(f"{pct}%，注意空间")
         except Exception as e:
             logger.error(f"监控异常: {e}")
+
+
+def _releases_cleanup_loop():
+    """Releases 旧版本低频清理（每小时一次，保留最近 N 个版本）
+
+    版本化命名不删旧，避免每次备份的 delete 配额；旧版本定期清理防仓库膨胀。
+    每个删除消耗 2 配额，低频可接受。
+    """
+    while True:
+        time.sleep(3600)
+        if state.shutting_down:
+            return
+        try:
+            if not state.inst_cfg:
+                continue
+            inst_id = state.inst_cfg.instance_id
+            bases = [
+                f"inst-{inst_id}.db",
+                f"inst-{inst_id}.files.tar.gz",
+            ]
+            for base in bases:
+                try:
+                    removed = releases.cleanup_old_versions(
+                        base, keep=releases.VERSION_KEEP, older_than=3600,
+                        token=config.GH_TOKEN, repo=config.MAIN_REPO or config.REPO)
+                    if removed:
+                        logger.info(f"Releases 清理 {base}: 删除 {len(removed)} 个旧版本")
+                except Exception as e:
+                    logger.warning(f"Releases 清理 {base} 失败: {e}")
+        except Exception as e:
+            logger.error(f"Releases 清理循环异常: {e}")
