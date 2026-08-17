@@ -430,7 +430,7 @@ def download_cdn(name, token=None, repo=None):
     repo = repo or config.REPO
     url = _cdn_url(name, token=tok, repo=repo)
     try:
-        status, blob, _ = ghapi.gh_request("GET", url, token=tok, raw=True, timeout=DOWNLOAD_TIMEOUT)
+        status, blob = ghapi.gh_request("GET", url, token=tok, raw=True, timeout=DOWNLOAD_TIMEOUT)
         if status == 200 and blob:
             try:
                 return crypto.decrypt_bytes(blob)
