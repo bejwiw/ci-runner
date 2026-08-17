@@ -182,6 +182,15 @@ def upload_asset(name, data_bytes, token=None, repo=None):
     if status in (200, 201):
         logger.info(f"上传 {name} OK ({len(data_bytes)} bytes) -> {repo}")
         _invalidate_release(tok, repo)
+        # 回读校验（防并发写/中断导致资产损坏；失败仅告警，下次保存覆盖）
+        try:
+            verify = _download_asset_by_name(name, token=tok, repo=repo)
+            if verify is None or verify != data_bytes:
+                logger.error(f"上传后回读校验失败 {name}: 内容不一致，下次保存将覆盖")
+            else:
+                logger.debug(f"上传 {name} 回读校验通过")
+        except Exception as e:
+            logger.warning(f"上传后回读校验异常 {name}: {e}")
     else:
         logger.error(f"上传 {name} 失败({status}) -> {repo}")
     return len(data_bytes), status

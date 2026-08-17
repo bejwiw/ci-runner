@@ -314,7 +314,7 @@ def banned_accounts():
 
 # ==================== 启动入口 ====================
 def run():
-    state.leader = core_lock.LeaderLock(backend="release")
+    state.leader = core_lock.LeaderLock(backend="storage", s3pool=state.s3pool)
     state.leader.acquire()
     if state.leader.is_leader:
         threading.Thread(target=state.leader.heartbeat_loop, daemon=True).start()

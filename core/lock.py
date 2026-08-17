@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Leader 锁
+Leader 锁：多个进程间唯一定义"谁负责写"。
 
-- backend="release"：基于 GitHub Releases leader.json 心跳（manager 用）
-- backend="manager"：基于 manager HTTP 心跳（worker 用，不占 GitHub 配额）
+存储后端两种：
+- storage：跨机器共享心跳文件（S3 主 / Releases 降级），manager 用
+- manager：通过 manager HTTP 查询心跳，worker 用（不占 GitHub 配额）
+
+选举规则：心跳 90s(HEARTBEAT_TIMEOUT) 无更新 → 视为 leader 失效，可抢占。
 """
-import os
 import time
 import json
 import uuid
@@ -19,81 +21,105 @@ from core.utils import http_request
 logger = log.setup_logger("lock")
 
 JOB_ID = uuid.uuid4().hex[:8]
+LEADER_S3_KEY = "meta/leader.json"
 
 
 class LeaderLock:
-    def __init__(self, backend="release", instance_id=None, token=None):
+    def __init__(self, backend="storage", instance_id=None, token=None, s3pool=None):
         self.backend = backend
         self.instance_id = instance_id or config.INSTANCE_ID
         self.token = token
+        self.s3pool = s3pool
         self.job_id = JOB_ID
         self.is_leader = False
         self.fail_count = 0
         self._on_promote = None
         self.mgr_host = config.MANAGER_HOST or "ghvps2.kekeke.cc.cd"
 
+    # ==================== 读取 ====================
     def _read_heartbeat(self):
-        """读取当前 leader 状态"""
         try:
-            if self.backend == "release":
-                blob = releases.download_asset(config.ASSET_LEADER, token=self.token)
-                if not blob:
-                    return None
-                return json.loads(blob.decode())
-            # manager 后端
-            url = (f"https://{self.mgr_host}/api/worker/leader"
-                   f"?inst_id={self.instance_id}&job_id={self.job_id}")
-            status, raw = http_request(url, method="GET",
-                                       headers={"Authorization": f"Bearer {config.EXEC_TOKEN}"},
-                                       timeout=10, retries=2)
-            if status != 200 or not raw:
-                return None
-            d = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
-            if not d.get("ok"):
-                return None
-            # 有别的活跃 leader → 返回"别人的心跳"防止 acquire
-            if d.get("has_leader") and d.get("leader_job") != self.job_id:
-                age = d.get("leader_age", 0)
-                return {"job_id": d.get("leader_job"),
-                        "heartbeat": time.time() - max(0, age)}
-            # 自己是 leader → 返回自己的心跳
-            if d.get("is_leader"):
-                return {"job_id": self.job_id, "heartbeat": time.time()}
-            return None
+            if self.backend == "manager":
+                return self._read_http()
+            return self._read_storage()
         except Exception as e:
             logger.debug(f"read_heartbeat 异常: {e}")
             return None
 
+    def _read_storage(self):
+        """读取共享心跳：S3 优先（0 配额），S3 不可用回退 Releases。"""
+        result = None
+        if self.s3pool and self.s3pool.is_ready():
+            blob = self.s3pool.get(LEADER_S3_KEY)
+            if blob:
+                return json.loads(blob.decode())
+            return None  # S3 正常但无文件 = 无 leader，不回退 Releases
+        if self.backend != "storage":
+            return None
+        blob = releases.download_asset(config.ASSET_LEADER, token=self.token)
+        return json.loads(blob.decode()) if blob else None
+
+    def _read_http(self):
+        url = (f"https://{self.mgr_host}/api/worker/leader"
+               f"?inst_id={self.instance_id}&job_id={self.job_id}")
+        status, raw = http_request(url, method="GET",
+                                   headers={"Authorization": f"Bearer {config.EXEC_TOKEN}"},
+                                   timeout=10, retries=2)
+        if status != 200 or not raw:
+            return None
+        d = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+        if not d.get("ok"):
+            return None
+        if d.get("has_leader") and d.get("leader_job") != self.job_id:
+            age = d.get("leader_age", 0)
+            return {"job_id": d.get("leader_job"),
+                    "heartbeat": time.time() - max(0, age)}
+        if d.get("is_leader"):
+            return {"job_id": self.job_id, "heartbeat": time.time()}
+        return None
+
+    # ==================== 写入 ====================
     def _write_heartbeat(self):
-        """写入心跳（leader 独占）"""
         try:
-            if self.backend == "release":
-                data = json.dumps({"job_id": JOB_ID, "heartbeat": time.time()}).encode()
-                releases.upload_asset(config.ASSET_LEADER, data, token=self.token)
-                return True
-            # manager 后端
-            url = f"https://{self.mgr_host}/api/worker/heartbeat"
-            payload = json.dumps({
-                "inst_id": self.instance_id, "job_id": self.job_id,
-                "version": config.CURRENT_SHA or "unknown",
-            }).encode()
-            status, _ = http_request(url, method="POST", data=payload,
-                                      headers={"Content-Type": "application/json",
-                                               "Authorization": f"Bearer {config.EXEC_TOKEN}"},
-                                      timeout=10, retries=2)
-            if status == 200:
-                self.fail_count = 0
-                return True
-            self.fail_count += 1
-            logger.debug(f"heartbeat 写入失败: status={status}")
-            return False
+            if self.backend == "manager":
+                return self._write_http()
+            return self._write_storage()
         except Exception as e:
             self.fail_count += 1
             logger.debug(f"write_heartbeat 异常: {e}")
             return False
 
+    def _write_storage(self):
+        data = json.dumps({"job_id": self.job_id, "heartbeat": time.time()}).encode()
+        if self.s3pool and self.s3pool.is_ready():
+            ok = self.s3pool.put(LEADER_S3_KEY, data)
+            self.fail_count = 0 if ok else self.fail_count + 1
+            return ok
+        if self.backend != "storage":
+            return False
+        releases.upload_asset(config.ASSET_LEADER, data, token=self.token)
+        self.fail_count = 0
+        return True
+
+    def _write_http(self):
+        url = f"https://{self.mgr_host}/api/worker/heartbeat"
+        payload = json.dumps({
+            "inst_id": self.instance_id, "job_id": self.job_id,
+            "version": config.CURRENT_SHA or "unknown",
+        }).encode()
+        status, _ = http_request(url, method="POST", data=payload,
+                                 headers={"Content-Type": "application/json",
+                                          "Authorization": f"Bearer {config.EXEC_TOKEN}"},
+                                 timeout=10, retries=2)
+        if status == 200:
+            self.fail_count = 0
+            return True
+        self.fail_count += 1
+        logger.debug(f"heartbeat 写入失败: status={status}")
+        return False
+
+    # ==================== 选举 ====================
     def acquire(self):
-        """尝试获取 leader（若已有别的活跃 leader 则失败）"""
         try:
             leader = self._read_heartbeat()
             now = time.time()
@@ -110,10 +136,7 @@ class LeaderLock:
             return True
 
     def heartbeat_loop(self):
-        """leader 心跳循环（仅 leader 运行）"""
-        while True:
-            if not self.is_leader:
-                return
+        while self.is_leader:
             time.sleep(config.HEARTBEAT_INTERVAL)
             try:
                 self._write_heartbeat()
@@ -121,41 +144,45 @@ class LeaderLock:
                 logger.debug(f"heartbeat_loop 写入异常: {e}")
 
     def follower_loop(self, on_promote=None):
-        """follower 等待升级为 leader"""
         self._on_promote = on_promote
-        while True:
-            if self.is_leader:
-                return
+        while not self.is_leader:
             time.sleep(config.HEARTBEAT_INTERVAL)
             try:
-                if self.backend == "release":
-                    leader = self._read_heartbeat()
-                    now = time.time()
-                    if not leader or (now - leader.get("heartbeat", 0)) >= config.HEARTBEAT_TIMEOUT:
-                        if self.acquire():
-                            self._fire_promote()
-                            return
-                else:
-                    # manager 后端：先检查是否有别的活跃 leader
-                    d = self._read_heartbeat()
-                    if d and d.get("job_id") != JOB_ID:
-                        continue
-                    # 无 leader 或自己曾是 leader，写心跳抢占
-                    ok = self._write_heartbeat()
-                    if ok:
-                        d = self._read_heartbeat()
-                        if d and d.get("job_id") == JOB_ID:
-                            self.is_leader = True
-                            logger.info(f"follower 升级为 leader: {self.job_id}")
-                            self._fire_promote()
-                            return
-                    elif self.fail_count >= 5:
-                        self.is_leader = True
-                        logger.warning("manager 不可达，降级为 leader")
-                        self._fire_promote()
-                        return
+                if self._try_promote():
+                    return
             except Exception as e:
                 logger.debug(f"follower_loop 异常: {e}")
+
+    def _try_promote(self):
+        if self.backend == "manager":
+            return self._try_promote_http()
+        leader = self._read_heartbeat()
+        now = time.time()
+        if leader and (now - leader.get("heartbeat", 0)) < config.HEARTBEAT_TIMEOUT:
+            return False
+        if self.acquire():
+            self._fire_promote()
+            return True
+        return False
+
+    def _try_promote_http(self):
+        d = self._read_heartbeat()
+        if d and d.get("job_id") != JOB_ID:
+            return False
+        if not self._write_heartbeat():
+            if self.fail_count >= 5:
+                self.is_leader = True
+                logger.warning("manager 不可达，降级为 leader")
+                self._fire_promote()
+                return True
+            return False
+        d = self._read_heartbeat()
+        if d and d.get("job_id") == JOB_ID:
+            self.is_leader = True
+            logger.info(f"follower 升级为 leader: {self.job_id}")
+            self._fire_promote()
+            return True
+        return False
 
     def _fire_promote(self):
         if self._on_promote:

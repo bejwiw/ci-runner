@@ -20,6 +20,10 @@ logger = log.setup_logger("store")
 _lock = threading.RLock()
 _s3pool = None
 
+# 已关闭实例墓碑（防自愈复活）
+_closed_ids = set()
+
+
 # Releases 冗余保存节流（S3 每次存，Releases 低频刷，防配额耗尽）
 RELEASES_FLUSH_INTERVAL = 300  # 至少间隔秒数
 _last_releases_save = [0.0]
@@ -63,7 +67,7 @@ def set_s3pool(pool):
 # ==================== 启动加载（只读一次 S3）====================
 def load_all():
     """启动时从 S3 加载所有数据到内存"""
-    global _loaded
+    global _loaded, _instances
     if _loaded:
         return
     with _lock:
@@ -72,6 +76,11 @@ def load_all():
         _load_instances_from_storage()
         _load_accounts_from_storage()
         _load_tasks_from_storage()
+        # 净化历史 closed 数据（旧版本可能残留 closed 实例在清单中）
+        for inst in list(_instances):
+            if inst.get("closed"):
+                _closed_ids.add(inst.get("id"))
+        _instances = [i for i in _instances if not i.get("closed")]
         _loaded = True
         logger.info(f"内存加载完成: {len(_instances)} 实例, {len(_accounts)} 账号, {len(_tasks)} 任务")
 
@@ -137,8 +146,11 @@ def get_instance(inst_id):
 
 
 def get_or_create_instance(inst_id, cfg):
-    """实例不存在时从配置恢复创建（自愈）"""
+    """实例不存在时从配置恢复创建（自愈）；已关闭实例拒绝复活"""
     with _lock:
+        if inst_id in _closed_ids:
+            logger.warning(f"实例 {inst_id} 已在关闭墓碑中，拒绝自愈复活")
+            return None
         for inst in _instances:
             if inst.get("id") == inst_id and not inst.get("closed"):
                 return inst
@@ -186,14 +198,23 @@ def update_instance(inst_id, **kwargs):
 
 
 def close_instance(inst_id):
+    """关闭实例：标记 closed → 进墓碑 → 从活跃清单移除（存储净化）"""
     with _lock:
         for inst in _instances:
             if inst.get("id") == inst_id:
                 inst["closed"] = True
                 inst["status"] = "closed"
-                save_instances(_instances)
+                _closed_ids.add(inst_id)
+                active = [i for i in _instances if i.get("id") != inst_id]
+                save_instances(active)
                 return True
     return False
+
+
+def is_closed(inst_id):
+    """实例是否在墓碑（已关闭）"""
+    with _lock:
+        return inst_id in _closed_ids
 
 
 def next_inst_id():
@@ -214,6 +235,10 @@ def save_instances(instances):
         return False
     global _instances
     with _lock:
+        # 过滤 closed（关闭实例只留墓碑，存储保持干净）
+        instances = [i for i in instances if not i.get("closed")]
+        for i in instances:
+            _closed_ids.discard(i.get("id"))
         _instances = instances
         s3_ok = False
         if _s3pool and _s3pool.is_ready():
