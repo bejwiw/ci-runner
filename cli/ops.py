@@ -241,7 +241,7 @@ def batch_create():
         return
 
     mcp_str = _input("是否启用 MCP？（默认是）: ")
-    mcp_enabled = mcp_str.lower() not in ("n", "no")
+    mcp_enabled = (mcp_str or "").lower() not in ("n", "no")
 
     console.print()
     console.print(f"  [cyan]账号: {account_name}[/]")
