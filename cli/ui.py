@@ -32,6 +32,7 @@ def main_menu():
     console.print(Rule("工具", style="dim"))
     console.print(r"  \[a] 实例管理（进程/备份/命令/资源）")
     console.print(r"  \[b] 攻击功能")
+    console.print(r"  \[c] 批量创建实例")
     console.print(r"  \[o] 总览")
     console.print("  [0] 退出")
     return ops._input("\n  请选择: ")
@@ -186,6 +187,8 @@ def run_menu():
                 instance_menu()
             elif choice in ("b", "B"):
                 attack_menu()
+            elif choice in ("c", "C"):
+                ops.batch_create()
             elif choice in ("o", "O"):
                 ops.overview()
             elif choice == "0" or choice is None:

@@ -150,6 +150,104 @@ def create_instance():
     return jsonify(ok=True, instance=inst, msg=f"实例 {inst_id} 创建中")
 
 
+@bp.route("/api/instances/batch", methods=["POST"])
+@require_auth
+def batch_create_instances():
+    """批量创建实例（并发）
+
+    请求体: {token, account, count, mcp_enabled}
+    返回: {ok, results:[{id,ok,url,mcp_url,hostname,error}], total, success, failed}
+    """
+    if not _is_leader():
+        return jsonify(ok=False, error="备份节点"), 503
+    d = request.get_json(silent=True) or {}
+    account_name = (d.get("account") or "").strip()
+    count = min(max(int(d.get("count", 1)), 1), 20)
+    mcp_enabled = d.get("mcp_enabled", True)
+
+    accts = accounts.load_accounts()
+    account = next((a for a in accts if a["name"] == account_name), None)
+    if not account:
+        return jsonify(ok=False, error=f"账号 {account_name} 不存在"), 404
+
+    # 检查并发配额
+    running = accounts._account_usage(account, workflow=config.WORKER_WORKFLOW)
+    max_c = account.get("max_concurrency", 20)
+    available = max_c - running
+    if available < count:
+        return jsonify(ok=False,
+            error=f"并发配额不足: 需要{count}个, 可用{available}个 (已用{running}/{max_c})"), 409
+
+    # sync_fork 只做一次（账号级操作）
+    try:
+        accounts.sync_fork(account)
+        time.sleep(2)
+    except Exception as e:
+        logger.warning(f"fork 异常: {e}")
+
+    # 预分配所有 inst_id（避免并发竞争 next_inst_id）
+    base_id = store.next_inst_id()
+    base_num = int(base_id.replace("inst", ""))
+
+    def _create_one(idx):
+        inst_num = base_num + idx
+        inst_id = f"inst{inst_num}"
+        hostname = f"{inst_id}.{config.BASE_DOMAIN}"
+        try:
+            tunnel_id, tunnel_token = tunnels.create_tunnel(hostname)
+            mcp_hostname = f"mcp-{hostname}"
+            mcp_tunnel_id, mcp_ttoken = "", ""
+            if mcp_enabled:
+                try:
+                    mcp_tunnel_id, mcp_ttoken = tunnels.create_mcp_tunnel(mcp_hostname)
+                except Exception as e:
+                    logger.warning(f"MCP 隧道失败 {inst_id}: {e}")
+            inst_cfg = {
+                "inst_id": inst_id, "hostname": hostname,
+                "tunnel_token": tunnel_token, "tunnel_id": tunnel_id,
+                "mcp_hostname": mcp_hostname, "mcp_tunnel_token": mcp_ttoken,
+                "mcp_tunnel_id": mcp_tunnel_id,
+                "account": account["name"], "account_repo": account["repo"],
+                "mcp_enabled": mcp_enabled,
+            }
+            store.save_instance_config(inst_id, inst_cfg)
+            # 触发 workflow（不等待 run_id，后续 worker 上报自动获取）
+            repo = account["repo"]
+            url = f"{ghapi.API_BASE}/repos/{repo}/actions/workflows/{config.WORKER_WORKFLOW}/dispatches"
+            d_status, _ = ghapi.gh_request("POST", url, token=account["token"],
+                data={"ref": "main", "inputs": {"INSTANCE_ID": inst_id}})
+            if d_status not in (200, 204):
+                return {"id": inst_id, "ok": False, "error": f"触发失败({d_status})"}
+            inst = {
+                "id": inst_id, "hostname": hostname,
+                "account": account["name"], "account_repo": account["repo"],
+                "tunnel_id": tunnel_id, "mcp_hostname": mcp_hostname,
+                "mcp_tunnel_id": mcp_tunnel_id, "run_id": None,
+                "status": "starting", "url": f"https://{hostname}",
+                "mcp_url": f"https://{mcp_hostname}" if mcp_ttoken else None,
+                "closed": False, "created_at": time.time(),
+            }
+            store.add_instance(inst)
+            logger.info(f"批量创建 {inst_id}: https://{hostname}")
+            return {"id": inst_id, "ok": True, "url": inst["url"],
+                    "mcp_url": inst.get("mcp_url"), "hostname": hostname}
+        except Exception as e:
+            return {"id": inst_id, "ok": False, "error": str(e)}
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    results = [None] * count
+    with ThreadPoolExecutor(max_workers=min(count, 10)) as executor:
+        futures = {executor.submit(_create_one, i): i for i in range(count)}
+        for future in as_completed(futures):
+            idx = futures[future]
+            results[idx] = future.result()
+
+    success = sum(1 for r in results if r["ok"])
+    logger.info(f"批量创建完成: {success}/{count} 成功 (账号={account_name})")
+    return jsonify(ok=True, results=results, total=count,
+                   success=success, failed=count - success)
+
+
 def _trigger_worker(account, inst_id):
     repo = account["repo"]
     url = f"{ghapi.API_BASE}/repos/{repo}/actions/workflows/{config.WORKER_WORKFLOW}/dispatches"

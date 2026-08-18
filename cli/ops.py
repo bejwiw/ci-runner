@@ -203,6 +203,142 @@ def create_instance():
         _err(f"创建失败: {data}")
 
 
+def batch_create():
+    """批量创建实例（并发 + 进度动画）"""
+    data = _get("accounts", msg="加载账号列表")
+    if not data or not data.get("accounts"):
+        _err("无可用账号")
+        return
+
+    accs = data["accounts"]
+    console.print()
+    for i, a in enumerate(accs):
+        console.print(f"  [{i}] {a['name']} ({a.get('repo', '')})")
+
+    sel = _input("选择账号（序号）: ")
+    if not sel:
+        return
+    try:
+        idx = int(sel)
+        account_name = accs[idx]["name"]
+    except (ValueError, IndexError):
+        _err("无效选择")
+        return
+
+    count_str = _input("创建数量（1-20）: ")
+    if not count_str:
+        return
+    try:
+        count = int(count_str)
+        if count < 1 or count > 20:
+            _err("数量应在 1-20")
+            return
+    except ValueError:
+        _err("无效数量")
+        return
+
+    mcp_str = _input("是否启用 MCP？（默认是）: ")
+    mcp_enabled = mcp_str.lower() not in ("n", "no")
+
+    console.print()
+    console.print(f"  [cyan]账号: {account_name}[/]")
+    console.print(f"  [cyan]数量: {count}[/]")
+    console.print(f"  [cyan]MCP: {'是' if mcp_enabled else '否'}[/]")
+    confirm = _input("确认创建？（回车确认）: ")
+    if confirm is None:
+        return
+
+    # 调用批量创建 API（后端并发）
+    result = api.post("/instances/batch", data={
+        "account": account_name,
+        "count": count,
+        "mcp_enabled": mcp_enabled,
+    }, timeout=180)
+
+    if not result.get("ok"):
+        _err(f"创建失败: {result.get('error', '未知错误')}")
+        return
+
+    results = result.get("results", [])
+    success_count = result.get("success", 0)
+    failed_count = result.get("failed", 0)
+
+    console.print()
+    for r in results:
+        if r["ok"]:
+            _ok(f"{r['id']} -> {r['url']}")
+        else:
+            _err(f"{r.get('id', '?')} 失败: {r.get('error', '')}")
+    _info(f"创建完成: {success_count} 成功, {failed_count} 失败")
+
+    if success_count == 0:
+        return
+
+    # 并发等待就绪
+    ok_instances = [r for r in results if r["ok"]]
+    _wait_batch_ready(ok_instances)
+
+
+def _wait_batch_ready(instances):
+    """并发等待批量实例就绪，rich Progress 动画"""
+    from rich.progress import (Progress, SpinnerColumn, TextColumn,
+                                BarColumn, TaskProgressColumn,
+                                TimeRemainingColumn)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    total = len(instances)
+    console.print()
+    console.print(f"  [cyan]等待 {total} 个实例就绪...[/]")
+    console.print()
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(bar_width=25),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=False,
+    ) as progress:
+        overall = progress.add_task("[bold cyan]整体进度", total=total)
+        inst_tasks = {}
+        for r in instances:
+            inst_tasks[r["id"]] = progress.add_task(
+                f"  [dim]{r['id']}[/]", total=60)
+
+        ready_count = 0
+
+        def _check_one(inst):
+            inst_id = inst["id"]
+            host = inst.get("hostname", "")
+            for attempt in range(60):
+                health = api.get_url(
+                    f"https://{host}/api/health", timeout=5)
+                if health.get("ok"):
+                    progress.update(inst_tasks[inst_id],
+                        description=f"  [green]\u2713 {inst_id} ({attempt*5}s)[/]",
+                        completed=60)
+                    progress.update(overall, advance=1)
+                    return True
+                progress.update(inst_tasks[inst_id], advance=1)
+                time.sleep(5)
+            progress.update(inst_tasks[inst_id],
+                description=f"  [yellow]\u26a0 {inst_id} (超时)[/]")
+            progress.update(overall, advance=1)
+            return False
+
+        with ThreadPoolExecutor(max_workers=min(total, 10)) as executor:
+            futures = [executor.submit(_check_one, r) for r in instances]
+            for f in as_completed(futures):
+                if f.result():
+                    ready_count += 1
+
+    console.print()
+    _info(f"就绪: {ready_count}/{total}")
+    if ready_count < total:
+        _warn(f"{total - ready_count} 个实例未就绪，可用 ghss --json instances 查看")
+
+
 def restart_instance():
     """优雅重启实例"""
     inst = pick_instance()
