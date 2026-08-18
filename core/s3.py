@@ -522,9 +522,7 @@ class S3Pool:
                         return idx, account
                 except Exception as e:
                     self._record_failure(account, e)
-                    account = self._select_account(chunk_key, exclude=[account])
-                    if account is None:
-                        break
+                    # 不重新选桶（设计意图：put和get必须在同一桶），继续用原桶重试
             return idx, None
 
         workers = _dynamic_concurrency(file_size)

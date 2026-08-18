@@ -82,9 +82,16 @@ def restore_files_from_bytes(data):
     try:
         with open(tmp, "wb") as f:
             f.write(data)
-        result = subprocess.run(
-            ["sudo", "tar", "xzf", tmp, "-C", os.path.expanduser("~")],
-            capture_output=True, timeout=180)
+        with open(tmp, "rb") as _f:
+            _hdr = _f.read(4)
+        if _hdr[:4] == b"\x28\xb5\x2f\xfd":
+            result = subprocess.run(
+                ["sudo", "tar", "--zstd", "-xf", tmp, "-C", os.path.expanduser("~")],
+                capture_output=True, timeout=180)
+        else:
+            result = subprocess.run(
+                ["sudo", "tar", "xzf", tmp, "-C", os.path.expanduser("~")],
+                capture_output=True, timeout=180)
         if result.returncode != 0:
             logger.error(f"文件解压失败: {result.stderr.decode(errors='replace')[:200]}")
             return False
@@ -98,7 +105,7 @@ def restore_files_from_bytes(data):
         try:
             os.remove(tmp)
         except Exception as e:
-            logger.debug(f"S3操作失败: {e}")
+            logger.debug(f"操作失败: {e}")
 
 
 # ==================== 备份/恢复 ====================
@@ -206,14 +213,7 @@ def backup_files(inst_cfg=None):
     if not tmp:
         return None
     file_size = os.path.getsize(tmp)
-    # S3（分片上传，不经过内存）
-    if _s3pool and _s3pool.is_ready():
-        s3_ok = _s3pool.put_file(files_key, tmp)
-        if s3_ok:
-            logger.info(f"文件 → S3 ({file_size} 字节)")
-        else:
-            logger.error(f"文件 → S3 失败! ({file_size} 字节)")
-    # Releases 异步双写（版本化命名；S3 失败时同步兜底）
+    # S3（分片上传，不经过内存）+ Releases 异步双写
     files_base = files_asset[:-4] if files_asset.endswith(".enc") else files_asset
     s3_ok = False
     if _s3pool and _s3pool.is_ready():

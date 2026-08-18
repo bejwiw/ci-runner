@@ -361,6 +361,7 @@ def _pty_reader(session_key, sid):
     sess = terminal.SESSIONS.get(session_key)
     if not sess:
         return
+    buf = b""
     try:
         while sess.attached:
             r, _, _ = select.select([sess.fd], [], [], 0.05)
@@ -369,11 +370,29 @@ def _pty_reader(session_key, sid):
                 if data is None:
                     break
                 if data:
-                    sess.feed(data)
-                    socketio.emit("output", data.decode("latin-1"), to=sid)
+                    buf += data
+                    try:
+                        text = buf.decode("utf-8")
+                        buf = b""
+                    except UnicodeDecodeError:
+                        for i in range(1, min(5, len(buf) + 1)):
+                            try:
+                                text = buf[:-i].decode("utf-8")
+                                buf = buf[-i:]
+                                break
+                            except UnicodeDecodeError:
+                                continue
+                        else:
+                            text = buf.decode("utf-8", errors="replace")
+                            buf = b""
+                    if text:
+                        sess.feed(text.encode("utf-8"))
+                        socketio.emit("output", text, to=sid)
             else:
                 wpid, status = os.waitpid(sess.pid, os.WNOHANG)
                 if wpid == sess.pid:
+                    if buf:
+                        socketio.emit("output", buf.decode("utf-8", errors="replace"), to=sid)
                     socketio.emit("exit", {"code": status}, to=sid)
                     break
     except Exception as e:
@@ -402,7 +421,7 @@ def ws_input(data):
     session_key = state._sid_to_key.get(request.sid, "")
     sess = terminal.SESSIONS.get(session_key)
     if sess:
-        sess.write_input(data if isinstance(data, bytes) else data.encode("latin-1"))
+        sess.write_input(data if isinstance(data, bytes) else data.encode("utf-8"))
 
 
 @socketio.on("resize")

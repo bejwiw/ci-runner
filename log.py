@@ -10,6 +10,7 @@ import time
 import datetime
 import threading
 import subprocess
+import logging
 from logging.handlers import RotatingFileHandler
 
 import config
@@ -28,7 +29,7 @@ def _bj_time():
     return datetime.timezone(datetime.timedelta(hours=8))
 
 
-class _BJFormatter(RotatingFileHandler.__class__ and __import__("logging").Formatter):
+class _BJFormatter(logging.Formatter):
     """北京时间格式化器"""
     def formatTime(self, record, datefmt=None):
         ct = datetime.datetime.fromtimestamp(record.created, tz=_bj_time())
@@ -45,7 +46,7 @@ _loggers = {}
 _loggers_lock = threading.Lock()
 
 
-class RingBufferHandler(__import__("logging").Handler):
+class RingBufferHandler(logging.Handler):
     """内存环形缓冲 handler"""
     def emit(self, record):
         try:
@@ -71,7 +72,7 @@ class RingBufferHandler(__import__("logging").Handler):
             pass
 
 
-class ContextFilter(__import__("logging").Filter):
+class ContextFilter(logging.Filter):
     """上下文过滤器：注入模块名和 JOB_ID"""
     def filter(self, record):
         name = getattr(record, "name", "")

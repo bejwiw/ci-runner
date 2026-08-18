@@ -18,3 +18,4 @@ venv/
 .DS_Store
 # 临时脚本不入库（本地保留）
 scripts/
+.bugfix-backup/

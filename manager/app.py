@@ -383,11 +383,30 @@ def _auto_update():
             url = f"{ghapi.API_BASE}/repos/{config.MAIN_REPO}/commits/main"
             _, d = ghapi.gh_request("GET", url)
             latest = d.get("sha", "")
-            if latest and latest != sha:
-                logger.info(f"新版本 {latest[:10]}，重启")
-                url2 = f"{ghapi.API_BASE}/repos/{config.REPO}/actions/workflows/{config.MANAGER_WORKFLOW}/dispatches"
-                ghapi.gh_request("POST", url2, data={"ref": "main"})
-                _t.sleep(60)
-                os._exit(0)
+            if not latest or latest == sha:
+                continue
+            logger.info(f"检测到新版本 {latest[:10]}（当前 {sha[:10]}）")
+            if config.REPO != config.MAIN_REPO:
+                m_status, _ = ghapi.gh_request(
+                    "POST", f"{ghapi.API_BASE}/repos/{config.REPO}/merge-upstream",
+                    data={"branch": "main"})
+                if m_status != 200:
+                    logger.error(f"fork 同步失败({m_status})，放弃")
+                    continue
+                _t.sleep(3)
+                v_status, v_d = ghapi.gh_request(
+                    "GET", f"{ghapi.API_BASE}/repos/{config.REPO}/git/refs/heads/main")
+                fork_sha = (v_d.get("object") or {}).get("sha", "") if v_status == 200 else ""
+                if not fork_sha or fork_sha != latest:
+                    logger.error(f"fork 验证失败，放弃")
+                    continue
+            url2 = f"{ghapi.API_BASE}/repos/{config.REPO}/actions/workflows/{config.MANAGER_WORKFLOW}/dispatches"
+            d_status, _ = ghapi.gh_request("POST", url2, data={"ref": "main"})
+            if d_status not in (200, 204):
+                logger.error(f"触发失败({d_status})，继续运行")
+                continue
+            logger.info(f"新版本已触发，60s 后退出")
+            _t.sleep(60)
+            os._exit(0)
         except Exception as e:
             logger.error(f"检查失败: {e}")
