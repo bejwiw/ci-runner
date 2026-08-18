@@ -89,6 +89,18 @@ def health_monitor_loop():
                         changed = True
                 else:
                     if inst.get("status") != "running":
+                        # restarting状态超时(>10min)：检查账号是否被封
+                        if inst.get("status") == "restarting":
+                            restart_time = inst.get("last_seen", 0)
+                            if isinstance(restart_time, (int, float)) and restart_time and time.time() - restart_time > 600:
+                                logger.warning(f"实例 {inst['id']} 重启超时(>10min)，检查账号状态")
+                                account = next((a for a in accounts.load_accounts()
+                                                if a["name"] == inst.get("account")), None)
+                                if account and ghapi.check_account_suspended(account.get("token")):
+                                    logger.warning(f"账号 {account['name']} 已被封禁，自动清理")
+                                    _auto_cleanup_account(account)
+                                    _fail_counts[inst["id"]] = 0
+                                    changed = True
                         continue
                     last_seen = inst.get("last_seen", 0)
                     if isinstance(last_seen, (int, float)) and last_seen and time.time() - last_seen < 180:
