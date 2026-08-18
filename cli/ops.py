@@ -205,12 +205,15 @@ def create_instance():
 
 def batch_create():
     """批量创建实例（并发 + 进度动画）"""
-    data = _get("accounts", msg="加载账号列表")
-    if not data or not data.get("accounts"):
-        _err("无可用账号")
+    d = _get("/api/accounts")
+    ok, data = api.check(d)
+    if not ok:
+        _err(f"无法获取账号列表: {data}")
         return
-
-    accs = data["accounts"]
+    accs = data.get("accounts", [])
+    if not accs:
+        _err("没有可用账号，请先添加账号")
+        return
     console.print()
     for i, a in enumerate(accs):
         console.print(f"  [{i}] {a['name']} ({a.get('repo', '')})")
