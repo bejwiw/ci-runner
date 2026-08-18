@@ -40,8 +40,9 @@ def _start_tunnel():
 
 
 def _heal_loop():
-    """自愈循环：S3 状态持久化 + 实例清单自愈 + MCP 隧道补创建"""
+    """自愈循环：S3 状态持久化 + 账号封禁检查 + 实例清单自愈 + MCP 隧道补创建"""
     empty_retries = 0
+    ban_check_counter = 0
     while True:
         time.sleep(120)
         try:
@@ -58,6 +59,11 @@ def _heal_loop():
                 store.flush_releases_dirty()
             except Exception as e:
                 logger.debug(f"flush_releases_dirty: {e}")
+            # 每10分钟检查所有账号是否被封
+            ban_check_counter += 1
+            if ban_check_counter >= 5:
+                ban_check_counter = 0
+                _check_banned_accounts()
             # 实例清单自愈
             insts = store.list_instances()
             if not insts:
@@ -71,6 +77,29 @@ def _heal_loop():
                 _ensure_mcp_tunnels(insts)
         except Exception as e:
             logger.error(f"异常: {e}")
+
+
+def _check_banned_accounts():
+    """检查所有账号是否被封，被封则自动清理（关闭实例 + 删除账号）"""
+    accs = accounts.load_accounts()
+    for acc in accs:
+        token = acc.get("token", "")
+        if not token:
+            continue
+        try:
+            if ghapi.check_account_suspended(token):
+                logger.warning(f"账号 {acc['name']} 已被封禁，自动清理")
+                insts = store.load_instances()
+                for inst in insts:
+                    if inst.get("account") == acc["name"] and not inst.get("closed"):
+                        try:
+                            store.close_instance(inst["id"])
+                        except Exception as e:
+                            logger.error(f"关闭 {inst['id']} 失败: {e}")
+                accounts.remove_account(acc["name"])
+                logger.info(f"账号 {acc['name']} 已自动清理")
+        except Exception as e:
+            logger.debug(f"检查 {acc.get('name')} 失败: {e}")
 
 
 def _self_heal_instances():
