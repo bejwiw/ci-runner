@@ -252,7 +252,7 @@ def batch_create():
         return
 
     # 调用批量创建 API（后端并发）
-    result = api.post("/instances/batch", data={
+    result = api.post("/api/instances/batch", data={
         "account": account_name,
         "count": count,
         "mcp_enabled": mcp_enabled,
