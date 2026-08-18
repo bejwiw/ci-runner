@@ -247,8 +247,8 @@ def batch_create():
     console.print(f"  [cyan]账号: {account_name}[/]")
     console.print(f"  [cyan]数量: {count}[/]")
     console.print(f"  [cyan]MCP: {'是' if mcp_enabled else '否'}[/]")
-    confirm = _input("确认创建？（回车确认）: ")
-    if confirm is None:
+    confirm = _input("确认创建？（回车确认，n取消）: ")
+    if confirm is not None and confirm.lower() in ("n", "no", "取消"):
         return
 
     # 调用批量创建 API（后端并发）
