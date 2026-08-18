@@ -37,9 +37,9 @@ def _post_inst(hostname, path, data=None, msg="请求中"):
     with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
         return api.post_inst(hostname, path, data=data)
 
-def _get_url(url, msg="加载中"):
+def _get_url(url, msg="加载中", timeout=60):
     with console.status(f"[cyan]{msg}...[/]", spinner="dots"):
-        return api.get_url(url)
+        return api.get_url(url, timeout=timeout)
 
 
 # ==================== 工具函数 ====================
