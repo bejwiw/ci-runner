@@ -206,7 +206,10 @@ def close_instance(inst_id):
                 inst["status"] = "closed"
                 _closed_ids.add(inst_id)
                 active = [i for i in _instances if i.get("id") != inst_id]
-                save_instances(active)
+                ok = save_instances(active)
+                if not ok:
+                    logger.error(f"关闭 {inst_id} 失败：S3/Releases 保存失败")
+                    return False
                 return True
     return False
 
