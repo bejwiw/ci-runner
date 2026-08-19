@@ -102,14 +102,16 @@ def test_update_instance(fresh_store):
 
 
 def test_close_instance(fresh_store):
-    """关闭实例"""
+    """关闭实例：从活跃清单移除（存储净化）+ 进墓碑"""
     store = fresh_store
     store.set_s3pool(MockS3Pool())
     store._loaded = True
     store._instances = [{"id": "inst1", "closed": False, "status": "running"}]
     assert store.close_instance("inst1") is True
-    assert store._instances[0]["closed"] is True
-    assert store._instances[0]["status"] == "closed"
+    # 实例从活跃清单移除
+    assert len(store._instances) == 0
+    # 进墓碑，拒绝自愈复活
+    assert store.is_closed("inst1") is True
 
 
 def test_next_inst_id(fresh_store):

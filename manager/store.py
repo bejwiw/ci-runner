@@ -206,7 +206,7 @@ def close_instance(inst_id):
                 inst["status"] = "closed"
                 _closed_ids.add(inst_id)
                 active = [i for i in _instances if i.get("id") != inst_id]
-                ok = save_instances(active)
+                ok = save_instances(active, force_empty=True)
                 if not ok:
                     logger.error(f"关闭 {inst_id} 失败：S3/Releases 保存失败")
                     return False
@@ -231,9 +231,12 @@ def next_inst_id():
 
 
 # ==================== 写入（更新内存 + 写 S3 + Releases）====================
-def save_instances(instances):
-    """保存实例清单（更新内存 + 写 S3 + Releases）"""
-    if not instances:
+def save_instances(instances, force_empty=False):
+    """保存实例清单（更新内存 + 写 S3 + Releases）
+
+    force_empty: 显式清空（关闭最后一个实例时用），默认拒绝空数据覆盖
+    """
+    if not instances and not force_empty:
         logger.warning("拒绝空数据覆盖实例清单")
         return False
     global _instances

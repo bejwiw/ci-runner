@@ -294,16 +294,19 @@ def close_instance(inst_id):
     account = next((a for a in accounts.load_accounts()
                     if a["name"] == inst.get("account")), None)
     if account and inst.get("run_id"):
-        try:
-            _c_status, _ = ghapi.gh_request("POST",
-                f"{ghapi.API_BASE}/repos/{account['repo']}/actions/runs/{inst['run_id']}/cancel",
-                token=account["token"])
-            if _c_status not in (200, 202):
-                logger.warning(f"取消 run {inst['run_id']} 失败: HTTP {_c_status}")
-            else:
-                logger.info(f"已取消 run {inst['run_id']}")
-        except Exception as e:
-            logger.warning(f"取消 run {inst['run_id']} 异常: {e}")
+        # 取消run（重试3次，确保worker进程被终止，避免僵尸worker继续续命）
+        for attempt in range(3):
+            try:
+                _c_status, _ = ghapi.gh_request("POST",
+                    f"{ghapi.API_BASE}/repos/{account['repo']}/actions/runs/{inst['run_id']}/cancel",
+                    token=account["token"])
+                if _c_status in (200, 202):
+                    logger.info(f"已取消 run {inst['run_id']}")
+                    break
+                logger.warning(f"取消 run {inst['run_id']} 失败: HTTP {_c_status} (第{attempt+1}/3次)")
+            except Exception as e:
+                logger.warning(f"取消 run {inst['run_id']} 异常: {e} (第{attempt+1}/3次)")
+            time.sleep(3)
     store.delete_instance_config(inst_id)
     if inst.get("tunnel_id"):
         tunnels.delete_tunnel(inst["tunnel_id"], inst.get("hostname", ""))

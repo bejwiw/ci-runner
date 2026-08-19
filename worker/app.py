@@ -442,6 +442,20 @@ def ws_disconnect():
         terminal.detach_session(session_key)
 
 
+# ==================== 隧道看门狗 ====================
+def _tunnel_watchdog(tunnel_mgr):
+    """隧道注册看门狗：120秒未注册则退出实例
+
+    目的：CF隧道启动失败时自动退出，让GitHub Actions run结束，
+    日志可见，避免僵尸worker持续运行和续命。
+    """
+    import time as _t
+    _t.sleep(120)
+    if not tunnel_mgr.registered:
+        logger.error("CF 隧道 120秒内未注册，退出实例（检查 token/ingress 配置）")
+        os._exit(1)
+
+
 # ==================== 优雅关闭 ====================
 def _signal_handler(signum, frame):
     logger.warning(f"信号 {signum}，最终快照")
@@ -491,6 +505,9 @@ def run():
     state.tunnel_mgr = TunnelManager(state.inst_cfg)
     JOB_STATE["last_url"] = state.tunnel_mgr.url
     state.tunnel_mgr.start_async()
+    # 隧道看门狗：120秒未注册则自动退出（run结束，日志可见，避免僵尸实例）
+    threading.Thread(target=_tunnel_watchdog,
+                     args=(state.tunnel_mgr,), daemon=True).start()
     logger.info(f"隧道已异步启动: {state.tunnel_mgr.url} ({time.time()-t0:.1f}s)")
 
     # 进程管理器 + API

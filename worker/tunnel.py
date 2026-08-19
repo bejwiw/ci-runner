@@ -44,12 +44,32 @@ class TunnelManager:
                 ["cloudflared", "tunnel", "--no-autoupdate", "run", "--token", token],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             logger.info(f"启动: {self.url} (pid={self.proc.pid})")
-            for line in self.proc.stdout:
-                if "Registered tunnel connection" in line.strip():
+            # 等待连接注册（最长120秒），失败则退出（让run结束，日志可见）
+            import time as _t
+            deadline = _t.time() + 120
+            while _t.time() < deadline:
+                line = self.proc.stdout.readline()
+                if not line:
+                    break
+                text = line.strip()
+                if "Registered tunnel connection" in text:
                     self.registered = True
                     logger.info("连接已注册")
-            logger.warning("隧道进程退出")
-            return self.registered
+                    # 继续读取输出（保持管道不堵塞），但不再阻塞主流程
+                    for l in self.proc.stdout:
+                        if "Registered tunnel connection" in l.strip():
+                            pass
+                    return True
+                if "ERR" in text or "error" in text.lower():
+                    logger.warning(f"cloudflared: {text[:200]}")
+            if not self.registered:
+                logger.error(f"CF 隧道连接失败（120秒超时），退出实例")
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+                return False
+            return True
         except Exception as e:
             logger.error(f"启动失败: {e}")
             return False
