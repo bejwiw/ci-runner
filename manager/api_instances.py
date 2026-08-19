@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 Manager 实例/账号/任务 API 路由（Blueprint）
+
+关闭实例流程（v2）：
+  1. 优先调用 worker /api/kill（永久关闭，立即退出不备份）
+  2. kill 失败（隧道不通/超时）→ 取消 GitHub Actions run（重试3次）
+  3. 删除实例配置（S3+Releases，重试3次）
+  4. 删除隧道/DNS + 异步清理备份数据
+  5. 墓碑持久化（S3 meta/closed_ids.json，重启后阻止自愈复活）
 """
 import time
 import json
@@ -13,6 +20,7 @@ from flask import Blueprint, request, jsonify
 import config
 import log
 from core import ghapi
+from core.utils import http_request
 from manager import state, store, accounts, tasks, tunnels, monitor
 
 logger = log.setup_logger("api")
@@ -286,15 +294,46 @@ def get_instance(inst_id):
 @bp.route("/api/instances/<inst_id>", methods=["DELETE"])
 @require_auth
 def close_instance(inst_id):
+    """关闭实例（v2：优先kill API，失败才取消run）
+
+    流程：
+    1. 调 worker /api/kill → 立即退出（不备份），等5秒
+    2. 无论kill是否成功，都取消 GitHub run（双保险，防续命触发新run）
+    3. 删除实例配置（S3+Releases，重试3次）
+    4. 删除隧道/DNS，异步清理备份数据
+    5. 墓碑持久化（防 manager 重启后自愈复活）
+    """
     if not _is_leader():
         return jsonify(ok=False, error="备份节点"), 503
     inst = store.get_instance(inst_id)
     if not inst:
         return jsonify(ok=False, error=f"实例 {inst_id} 不存在"), 404
+
+    # 1. 优先调用 worker 永久关闭 API（立即退出，不备份）
+    host = inst.get("hostname", "")
+    if host:
+        kill_ok = False
+        try:
+            kill_url = f"https://{host}/api/kill"
+            k_status, _ = http_request(kill_url, method="POST",
+                data=json.dumps({"token": config.EXEC_TOKEN}).encode(),
+                headers={"Content-Type": "application/json"},
+                timeout=15, retries=2)
+            if k_status == 200:
+                kill_ok = True
+                logger.info(f"{inst_id} kill 指令已送达，等待退出")
+                time.sleep(5)
+            else:
+                logger.warning(f"{inst_id} kill 返回 HTTP {k_status}，走取消run")
+        except Exception as e:
+            logger.warning(f"{inst_id} kill 失败: {e}，走取消run")
+    else:
+        logger.warning(f"{inst_id} 无域名，跳过 kill 直接取消run")
+
+    # 2. 取消 GitHub run（kill 成功也取消，双保险防续命）
     account = next((a for a in accounts.load_accounts()
                     if a["name"] == inst.get("account")), None)
     if account and inst.get("run_id"):
-        # 取消run（重试3次，确保worker进程被终止，避免僵尸worker继续续命）
         for attempt in range(3):
             try:
                 _c_status, _ = ghapi.gh_request("POST",
@@ -307,11 +346,16 @@ def close_instance(inst_id):
             except Exception as e:
                 logger.warning(f"取消 run {inst['run_id']} 异常: {e} (第{attempt+1}/3次)")
             time.sleep(3)
+
+    # 3. 删除实例配置（S3 + Releases，失败重试3次）
     store.delete_instance_config(inst_id)
+
+    # 4. 删除隧道/DNS
     if inst.get("tunnel_id"):
         tunnels.delete_tunnel(inst["tunnel_id"], inst.get("hostname", ""))
     if inst.get("mcp_tunnel_id"):
         tunnels.delete_tunnel(inst["mcp_tunnel_id"], inst.get("mcp_hostname", ""))
+
     # 异步清理备份数据，不阻塞 close 响应（大量分片时可能较慢）
     threading.Thread(target=store.purge_instance_data, args=(inst_id,), daemon=True).start()
     state.worker_heartbeats.pop(inst_id, None)
@@ -517,7 +561,6 @@ def _restart_worker(inst_id, inst):
     shutdown_ok = False
     if host:
         try:
-            from core.utils import http_request
             url = f"https://{host}/api/shutdown"
             status, _ = http_request(url, method="POST",
                 data=json.dumps({"token": config.EXEC_TOKEN}).encode(),

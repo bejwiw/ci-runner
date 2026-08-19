@@ -6,6 +6,9 @@ Worker 后台循环
 1. _worker_pre_wake 从 S3 读实例配置（旧项目只从 Releases 读）
 2. _report_running 用 time.time()（旧项目格式不一致）
 3. _backup_loop 统一（去掉 persistence.py 的重复 backup_loop）
+4. _report_running 增加关闭检测：上报收到 404（墓碑拒绝自愈）连续3次
+   主动退出释放配额。404 是明确的关闭信号（只有墓碑拒绝才返回），
+   网络错误/超时/其他状态码不会计数，配置误删也不会触发（实例仍在上报200）。
 """
 import os
 import time
@@ -13,6 +16,7 @@ import json
 import threading
 import subprocess
 import urllib.request
+import urllib.error
 
 import config
 import log
@@ -21,6 +25,9 @@ from core import status as core_status
 from worker import state, persistence
 
 logger = log.setup_logger("loops")
+
+# 关闭检测阈值：上报连续被拒（404）次数达到该值则退出
+REJECT_THRESHOLD = 3
 
 
 def start_loops():
@@ -67,8 +74,14 @@ def _backup_loop():
 
 
 def _report_running():
-    """周期向 manager 上报（每60秒，携带S3摘要+进程数+磁盘）"""
+    """周期向 manager 上报（每60秒，携带S3摘要+进程数+磁盘）
+
+    关闭检测：上报收到 404 表示实例已被关闭（墓碑拒绝自愈），
+    连续 REJECT_THRESHOLD 次（约3分钟）主动退出释放 GitHub 配额。
+    只对 404 计数；网络错误/超时/其他状态码不计数（防误杀）。
+    """
     mgr = config.MANAGER_HOST or "ghvps2.kekeke.cc.cd"
+    rejected_count = 0
     while True:
         if state.shutting_down:
             logger.info("关闭中，停止上报")
@@ -120,12 +133,33 @@ def _report_running():
             req = urllib.request.Request(url, data=payload, headers={
                 "Content-Type": "application/json",
                 "User-Agent": "Mozilla/5.0 (ghbox-worker)"})
-            urllib.request.urlopen(req, timeout=20)
-            # 上报成功，清零pending
-            from worker import persistence
-            persistence.clear_pending()
+            try:
+                urllib.request.urlopen(req, timeout=20)
+                # 上报成功，清零pending + 重置拒绝计数
+                from worker import persistence
+                persistence.clear_pending()
+                if rejected_count > 0:
+                    logger.info(f"上报恢复成功（此前被拒{rejected_count}次）")
+                rejected_count = 0
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    # 404 = 实例已关闭（墓碑拒绝自愈），连续多次确认后退出
+                    rejected_count += 1
+                    logger.warning(f"上报被拒(404) 第{rejected_count}/{REJECT_THRESHOLD}次，实例可能已关闭")
+                    if rejected_count >= REJECT_THRESHOLD:
+                        logger.warning(f"连续{REJECT_THRESHOLD}次被拒，确认实例已关闭，主动退出释放配额")
+                        os._exit(0)
+                else:
+                    # 其他HTTP错误不计数（可能是manager临时故障）
+                    logger.warning(f"上报失败: HTTP {e.code}")
+                    rejected_count = 0
+            except Exception as e:
+                # 网络错误/超时不计数（防误杀）
+                logger.warning(f"上报失败: {e}")
+                rejected_count = 0
         except Exception as e:
             logger.warning(f"上报失败: {e}")
+            rejected_count = 0
         time.sleep(60)
 
 

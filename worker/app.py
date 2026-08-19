@@ -261,6 +261,28 @@ def toggle_mcp():
         return jsonify(ok=True, msg="MCP 已关闭")
 
 
+# ==================== 永久关闭（区别于优雅关闭）====================
+@app.route("/api/kill", methods=["POST"])
+def kill_now():
+    """永久关闭：立即退出，不备份、不flush。
+
+    与 /api/shutdown（优雅关闭：备份→上报→退出）严格区分。
+    主管家关闭实例时优先调用本接口，实例无条件立即退出，
+    释放 GitHub Actions 配额。
+    """
+    data = request.get_json(silent=True) or {}
+    if not _check(data):
+        return jsonify(ok=False, error="未授权"), 401
+    logger.warning("收到永久关闭指令（kill），立即退出，不备份")
+    state.shutting_down = True  # 立即停止上报/备份/续命循环
+    # 延迟0.5秒退出，确保响应先送达客户端
+    def _do_exit():
+        time.sleep(0.5)
+        os._exit(0)
+    threading.Thread(target=_do_exit, daemon=True).start()
+    return jsonify(ok=True, msg="实例正在退出")
+
+
 # ==================== 优雅关闭 ====================
 @app.route("/api/shutdown", methods=["POST"])
 def graceful_shutdown():
