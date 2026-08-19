@@ -32,6 +32,14 @@ class MockS3Pool:
     def put(self, key, data):
         self._data[key] = data
         return True
+    def put_meta_json(self, key, obj):
+        self._data[key] = json.dumps(obj).encode()
+        return True
+    def get_meta_json(self, key, default=None):
+        raw = self._data.get(key)
+        if raw is None:
+            return default
+        return json.loads(raw.decode())
     def delete(self, key):
         self._data.pop(key, None)
 
@@ -112,6 +120,37 @@ def test_close_instance(fresh_store):
     assert len(store._instances) == 0
     # 进墓碑，拒绝自愈复活
     assert store.is_closed("inst1") is True
+
+
+def test_closed_ids_persist_and_block_self_heal(fresh_store):
+    """墓碑持久化 + 拒绝自愈复活"""
+    store = fresh_store
+    pool = MockS3Pool()
+    store.set_s3pool(pool)
+    store._loaded = True
+    store._instances = [{"id": "inst1", "closed": False, "status": "running"},
+                        {"id": "inst2", "closed": False, "status": "running"}]
+    assert store.close_instance("inst1") is True
+    # 墓碑应该被持久化到S3
+    assert pool.get("meta/closed_ids.json") is not None
+    closed = pool.get("meta/closed_ids.json")
+    assert "inst1" in closed.decode()
+
+    # 模拟manager重启：重新加载
+    store._loaded = False
+    store._instances = []
+    store._closed_ids.clear()
+    store.load_all()
+    # 墓碑应该被恢复
+    assert store.is_closed("inst1") is True
+
+    # get_or_create_instance 应该拒绝已关闭的实例
+    result = store.get_or_create_instance("inst1", {"hostname": "inst1.kekeke.cc.cd"})
+    assert result is None
+
+    # 正常实例不受影响
+    result = store.get_or_create_instance("inst2", {"hostname": "inst2.kekeke.cc.cd"})
+    assert result is not None
 
 
 def test_next_inst_id(fresh_store):

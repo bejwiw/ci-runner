@@ -81,8 +81,40 @@ def load_all():
             if inst.get("closed"):
                 _closed_ids.add(inst.get("id"))
         _instances = [i for i in _instances if not i.get("closed")]
+        # 加载持久化墓碑（manager重启后防止已关闭实例被自愈复活）
+        _load_closed_ids_from_storage()
         _loaded = True
         logger.info(f"内存加载完成: {len(_instances)} 实例, {len(_accounts)} 账号, {len(_tasks)} 任务")
+
+
+def _closed_ids_key():
+    """墓碑持久化S3 key"""
+    return "meta/closed_ids.json"
+
+
+def _save_closed_ids_to_storage():
+    """持久化墓碑到S3（manager重启后不丢失）"""
+    if not _s3pool or not _s3pool.is_ready():
+        return
+    try:
+        data = sorted(list(_closed_ids))
+        _s3pool.put_meta_json(_closed_ids_key(), data)
+        logger.info(f"墓碑已持久化 ({len(data)} 个已关闭实例)")
+    except Exception as e:
+        logger.warning(f"墓碑持久化失败: {e}")
+
+
+def _load_closed_ids_from_storage():
+    """从S3加载墓碑（启动时调用）"""
+    if _s3pool and _s3pool.is_ready():
+        try:
+            data = _s3pool.get_meta_json(_closed_ids_key(), default=[])
+            if data and isinstance(data, list):
+                for i in data:
+                    _closed_ids.add(str(i))
+                logger.info(f"从S3加载墓碑: {len(_closed_ids)} 个已关闭实例")
+        except Exception as e:
+            logger.warning(f"墓碑加载失败: {e}")
 
 
 def _load_instances_from_storage():
@@ -210,6 +242,8 @@ def close_instance(inst_id):
                 if not ok:
                     logger.error(f"关闭 {inst_id} 失败：S3/Releases 保存失败")
                     return False
+                # 持久化墓碑（防止manager重启后自愈复活）
+                _save_closed_ids_to_storage()
                 return True
     return False
 
@@ -358,15 +392,28 @@ def load_instance_config(inst_id):
 
 
 def delete_instance_config(inst_id):
-    """删除实例配置"""
+    """删除实例配置（S3 + Releases，失败重试3次）"""
     with _lock:
         _instance_configs.pop(inst_id, None)
-    if _s3pool and _s3pool.is_ready():
+    # S3 删除（重试3次）
+    for attempt in range(3):
         try:
-            _s3pool.delete(_inst_config_key(inst_id))
+            if _s3pool and _s3pool.is_ready():
+                _s3pool.delete(_inst_config_key(inst_id))
+            break
         except Exception as e:
-            logger.warning(f"S3 删除实例配置失败: {e}")
-    releases.delete_asset(f"inst-{inst_id}.json.enc")
+            logger.warning(f"S3 删除实例配置失败: {e} (第{attempt+1}/3次)")
+            if attempt < 2:
+                time.sleep(2)
+    # Releases 删除（重试3次）
+    for attempt in range(3):
+        try:
+            releases.delete_asset(f"inst-{inst_id}.json.enc")
+            break
+        except Exception as e:
+            logger.warning(f"Releases 删除实例配置失败: {e} (第{attempt+1}/3次)")
+            if attempt < 2:
+                time.sleep(2)
 
 
 def purge_instance_data(inst_id):

@@ -369,7 +369,12 @@ def instance_report(inst_id):
         cfg = store.load_instance_config(inst_id)
         if cfg:
             inst = store.get_or_create_instance(inst_id, cfg)
-            logger.info(f"实例 {inst_id} 已自愈恢复")
+            if inst:
+                logger.info(f"实例 {inst_id} 已自愈恢复")
+            else:
+                # 实例已关闭（在墓碑中），拒绝自愈复活
+                logger.warning(f"实例 {inst_id} 已关闭，拒绝自愈复活")
+                return jsonify(ok=False, error=f"实例 {inst_id} 已关闭"), 404
         else:
             return jsonify(ok=False, error=f"实例 {inst_id} 不存在且无配置"), 404
     # 防御：重启中不改状态（worker 收到 /api/shutdown 后会设 shutting_down 停止上报，
