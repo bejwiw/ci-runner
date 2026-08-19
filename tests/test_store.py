@@ -54,6 +54,7 @@ def fresh_store(monkeypatch):
     store._tasks.clear()
     store._worker_stats.clear()
     store._instance_configs.clear()
+    store._closed_ids.clear()
     store._loaded = False
     # mock Releases（避免网络）
     monkeypatch.setattr("manager.store.releases.save_json_enc", lambda *a, **kw: True)

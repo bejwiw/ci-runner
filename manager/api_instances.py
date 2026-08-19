@@ -408,6 +408,10 @@ def instance_report(inst_id):
     _existing["a_count_total"] = _wstats.get("a_count_total", 0)
     _existing["b_count_total"] = _wstats.get("b_count_total", 0)
     state.worker_heartbeats[inst_id] = _existing
+    # 墓碑防御：实例在墓碑中（已关闭），即使实例列表有残留也拒绝（双保险）
+    if store.is_closed(inst_id):
+        logger.warning(f"实例 {inst_id} 已关闭（墓碑），拒绝上报/复活")
+        return jsonify(ok=False, error=f"实例 {inst_id} 已关闭"), 404
     inst = store.get_instance(inst_id)
     if not inst:
         cfg = store.load_instance_config(inst_id)

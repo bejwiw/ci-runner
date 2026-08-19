@@ -5,6 +5,12 @@
 设计：启动时从 S3 读一次加载到内存，之后只用内存。
 状态变动时更新内存 + 写 S3（S3 只做持久化备份，不做实时读取源）。
 leader 锁保证只有一个 writer，不存在并发写问题。
+
+关闭语义（v2）：
+- close_instance：标记 closed → 进墓碑(_closed_ids) → 从活跃清单移除
+- 墓碑持久化到 S3（meta/closed_ids.json），manager 重启后不丢失
+- load_all 时墓碑净化：_instances 中在墓碑里的实例被移除
+- instance_report / get_or_create_instance 双重墓碑检查，杜绝自愈复活
 """
 import time
 import json as _json
@@ -20,7 +26,7 @@ logger = log.setup_logger("store")
 _lock = threading.RLock()
 _s3pool = None
 
-# 已关闭实例墓碑（防自愈复活）
+# 已关闭实例墓碑（防自愈复活，持久化到S3）
 _closed_ids = set()
 
 
@@ -64,29 +70,7 @@ def set_s3pool(pool):
         load_all()
 
 
-# ==================== 启动加载（只读一次 S3）====================
-def load_all():
-    """启动时从 S3 加载所有数据到内存"""
-    global _loaded, _instances
-    if _loaded:
-        return
-    with _lock:
-        if _loaded:
-            return
-        _load_instances_from_storage()
-        _load_accounts_from_storage()
-        _load_tasks_from_storage()
-        # 净化历史 closed 数据（旧版本可能残留 closed 实例在清单中）
-        for inst in list(_instances):
-            if inst.get("closed"):
-                _closed_ids.add(inst.get("id"))
-        _instances = [i for i in _instances if not i.get("closed")]
-        # 加载持久化墓碑（manager重启后防止已关闭实例被自愈复活）
-        _load_closed_ids_from_storage()
-        _loaded = True
-        logger.info(f"内存加载完成: {len(_instances)} 实例, {len(_accounts)} 账号, {len(_tasks)} 任务")
-
-
+# ==================== 墓碑持久化 ====================
 def _closed_ids_key():
     """墓碑持久化S3 key"""
     return "meta/closed_ids.json"
@@ -115,6 +99,39 @@ def _load_closed_ids_from_storage():
                 logger.info(f"从S3加载墓碑: {len(_closed_ids)} 个已关闭实例")
         except Exception as e:
             logger.warning(f"墓碑加载失败: {e}")
+
+
+# ==================== 启动加载（只读一次 S3）====================
+def load_all():
+    """启动时从 S3 加载所有数据到内存"""
+    global _loaded, _instances
+    if _loaded:
+        return
+    with _lock:
+        if _loaded:
+            return
+        _load_instances_from_storage()
+        _load_accounts_from_storage()
+        _load_tasks_from_storage()
+        # 先加载持久化墓碑（必须在净化之前，墓碑优先）
+        _load_closed_ids_from_storage()
+        # 净化：移除墓碑中的实例 + 历史 closed 数据
+        before = len(_instances)
+        for inst in list(_instances):
+            if inst.get("closed") or inst.get("id") in _closed_ids:
+                _closed_ids.add(inst.get("id"))
+        _instances = [i for i in _instances
+                      if not i.get("closed") and i.get("id") not in _closed_ids]
+        if len(_instances) != before:
+            logger.warning(f"墓碑净化: 移除 {before - len(_instances)} 个已关闭实例（残留S3脏数据）")
+            # 同步修正S3中的实例列表
+            try:
+                _s3_put_json("meta/instances.json", _instances)
+                _save_closed_ids_to_storage()
+            except Exception as e:
+                logger.warning(f"S3同步净化失败: {e}")
+        _loaded = True
+        logger.info(f"内存加载完成: {len(_instances)} 实例, {len(_accounts)} 账号, {len(_tasks)} 任务, 墓碑{len(_closed_ids)}个")
 
 
 def _load_instances_from_storage():
@@ -205,6 +222,8 @@ def get_or_create_instance(inst_id, cfg):
             "closed": False,
             "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "last_seen": time.time(),
+            "is_temp": cfg.get("storage_mode", "full") == "none",
+            "storage_mode": cfg.get("storage_mode", "full"),
         }
         _instances.append(new_inst)
         save_instances(_instances)
@@ -261,7 +280,17 @@ def next_inst_id():
             nums.append(int(inst["id"].replace("inst", "")))
         except (ValueError, KeyError):
             pass
-    return f"inst{max(nums) + 1 if nums else 1}"
+    # 跳过墓碑中的ID（避免复用已关闭的ID）
+    closed_nums = set()
+    for i in _closed_ids:
+        try:
+            closed_nums.add(int(i.replace("inst", "")))
+        except (ValueError, KeyError):
+            pass
+    n = max(nums) + 1 if nums else 1
+    while n in closed_nums:
+        n += 1
+    return f"inst{n}"
 
 
 # ==================== 写入（更新内存 + 写 S3 + Releases）====================
@@ -361,8 +390,12 @@ def _inst_config_key(inst_id):
     return f"meta/inst-config/{inst_id}.json"
 
 
-def save_instance_config(inst_id, cfg):
-    """保存实例配置（更新内存 + 写 S3 + Releases）"""
+def save_instance_config(inst_id, cfg, repo=None, token=None):
+    """保存实例配置（更新内存 + 写 S3 + Releases）
+
+    repo: 指定写到的仓库（worker的fork仓库），None则写主仓库
+    token: 指定写入用的token（fork仓库的token），None则用config.GH_TOKEN
+    """
     with _lock:
         _instance_configs[inst_id] = cfg
     if _s3pool and _s3pool.is_ready():
@@ -371,7 +404,7 @@ def save_instance_config(inst_id, cfg):
         except Exception as e:
             logger.warning(f"S3 保存实例配置 {inst_id} 失败: {e}")
     try:
-        releases.save_json_enc(f"inst-{inst_id}.json.enc", cfg)
+        releases.save_json_enc(f"inst-{inst_id}.json.enc", cfg, token=token, repo=repo)
     except Exception as e:
         logger.warning(f"Releases 保存实例配置 {inst_id} 失败: {e}")
 
@@ -524,6 +557,7 @@ def purge_instance_data(inst_id):
             logger.warning(f"Releases 清理 {asset_name} 失败: {e}")
 
     logger.info(f"实例 {inst_id} 备份数据已彻底清理 (S3+Releases)")
+
 
 def get_worker_stats(inst_id):
     """获取 worker 操作统计（纯内存，不读 S3）"""
