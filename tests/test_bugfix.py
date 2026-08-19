@@ -131,8 +131,8 @@ class TestBug2PutGetSymmetry:
         assert 'testkey' in client0.stored
         assert 'testkey' not in client1.stored
 
-    def test_put_returns_false_when_bucket_unwritable(self):
-        """原桶不可写时，put返回False，不换桶"""
+    def test_put_falls_back_when_bucket_unwritable(self):
+        """原桶不可写时，put fallback到附近可写桶（v2设计）"""
         pool = _make_pool()
         # 让桶0不可写（used_bytes超过限制）
         pool._counters[0]['used_bytes'] = 5_000_000_000  # 5GB > 4.5GB限制
@@ -144,7 +144,30 @@ class TestBug2PutGetSymmetry:
         pool._get_object_size = lambda idx, key: len(clients[idx].stored.get(key, b''))
 
         result = pool.put('testkey', b'data')
-        # 应该返回False，数据不应该写到桶1
+        # v2: fallback成功，数据写到桶1
+        assert result is True
+        assert 'testkey' not in client0.stored
+        assert 'testkey' in client1.stored
+
+    def test_put_returns_false_when_all_unwritable(self):
+        """所有桶都不可写时，put返回False"""
+        pool = _make_pool()
+        # 让所有桶不可写
+        for i in pool._counters:
+            pool._counters[i]['used_bytes'] = 5_000_000_000  # 5GB > 4.5GB限制
+        # nearby只返回存在的账号（真实环境不会返回不存在的账号）
+        pool._hash_ring = type('R', (), {
+            'get_account': lambda s, k: 0,
+            'get_nearby_accounts': lambda s, k, count=10: [1]
+        })()
+
+        client0 = FakeClient()
+        client1 = FakeClient()
+        clients = {0: client0, 1: client1}
+        pool._get_client = lambda idx: clients[idx]
+        pool._get_object_size = lambda idx, key: len(clients[idx].stored.get(key, b''))
+
+        result = pool.put('testkey', b'data')
         assert result is False
         assert 'testkey' not in client0.stored
         assert 'testkey' not in client1.stored

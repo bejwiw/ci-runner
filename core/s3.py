@@ -9,6 +9,12 @@ S3 多账号存储池（Tigris）+ 一致性哈希
 一致性哈希：增减账号只影响约1/N的数据位置，不需要全量迁移。
 账号状态机：active → degraded(3次失败) → unavailable(5次失败) → 每5分钟探测恢复。
 S3不加密（私有访问），Releases降级存储加密。
+
+写入fallback（v2，2026-08-19）：
+  原账号不可写（unavailable/配额满）时，put 自动 fallback 到附近可写账号。
+  get() 已有 nearby 遍历逻辑，所以 fallback 写入的数据仍可被读到；
+  delete() 幂等删除原账号 + nearby，覆盖 fallback 场景。
+  这修复了"单个账号不可用时 meta/instances.json 等关键数据无法写入"的问题。
 """
 import os
 import json
@@ -207,10 +213,10 @@ class S3Pool:
         return 1 if c.get("status") == "degraded" else 0
 
     def _select_account(self, key, exclude=None):
-        """用一致性哈希选账号。只返回原桶，不fallback到其他桶。
+        """用一致性哈希选账号。原账号不可写时 fallback 到附近可写账号。
 
-        修复Bug 2: put()和get()必须在同一个桶，否则put换桶后get读旧数据。
-        如果原桶不可写，返回None，让调用方处理失败。
+        get() 已有 nearby 遍历逻辑，所以 put fallback 后数据仍可被读到；
+        delete() 幂等删除原账号 + nearby，覆盖 fallback 场景。
         """
         acct = self._hash_ring.get_account(key)
         if acct is None:
@@ -219,6 +225,16 @@ class S3Pool:
             return None
         if self._is_writable(acct):
             return acct
+        # fallback：找附近可写账号（排除原账号）
+        for alt_idx in self._hash_ring.get_nearby_accounts(key, MAX_SCAN):
+            if alt_idx == acct:
+                continue
+            if exclude and alt_idx in exclude:
+                continue
+            if self._is_writable(alt_idx):
+                logger.info(f"{key} 原账号{acct}不可写，fallback到账号{alt_idx}")
+                return alt_idx
+        logger.warning(f"{key} 原账号{acct}及附近账号均不可写")
         return None
 
     def _record_failure(self, idx, error):
@@ -269,7 +285,7 @@ class S3Pool:
             return False
         account_idx = self._select_account(key)
         if account_idx is None:
-            logger.error(f"原账号不可写，拒绝写入 {key}")
+            logger.error(f"无可用账号，拒绝写入 {key}")
             return False
         old_size = self._get_object_size(account_idx, key)
         for attempt in range(MAX_RETRIES):
@@ -323,36 +339,46 @@ class S3Pool:
 
     # ==================== 删除 ====================
     def delete(self, key):
+        """删除key。幂等删除原账号 + nearby（覆盖fallback写入场景）。"""
         if not self._initialized:
             return False
         account_idx = self._hash_ring.get_account(key)
         if account_idx is None:
             return True
-        try:
-            client = self._get_client(account_idx)
-            # 先查对象大小用于回扣 used_bytes
-            file_size = 0
+        deleted = False
+        # 原账号 + nearby 都删（delete_object 幂等，不存在也成功）
+        candidates = [account_idx]
+        for a in self._hash_ring.get_nearby_accounts(key, MAX_SCAN):
+            if a != account_idx:
+                candidates.append(a)
+        for idx in candidates:
+            if self._counters.get(idx, {}).get("status") == "unavailable":
+                continue
             try:
-                from botocore.exceptions import ClientError
-                head = client._client.head_object(
-                    Bucket=client.bucket, Key=f"{S3_PREFIX}/{key}")
-                file_size = head.get("ContentLength", 0) or 0
-            except ClientError as e:
-                logger.debug(f"head_object {key} 失败: {e}")
+                client = self._get_client(idx)
+                # 先查对象大小用于回扣 used_bytes
+                file_size = 0
+                try:
+                    from botocore.exceptions import ClientError
+                    head = client._client.head_object(
+                        Bucket=client.bucket, Key=f"{S3_PREFIX}/{key}")
+                    file_size = head.get("ContentLength", 0) or 0
+                except ClientError:
+                    pass
+                except Exception:
+                    pass
+                client.delete(key)
+                with self._lock:
+                    self._counters[idx]["a_count"] += 1
+                    if file_size > 0:
+                        self._counters[idx]["used_bytes"] = max(
+                            0, self._counters[idx]["used_bytes"] - file_size)
+                self._record_success(idx)
+                deleted = True
             except Exception as e:
-                logger.debug(f"head_object {key} 异常: {e}")
-            client.delete(key)
-            with self._lock:
-                self._counters[account_idx]["a_count"] += 1
-                if file_size > 0:
-                    self._counters[account_idx]["used_bytes"] = max(
-                        0, self._counters[account_idx]["used_bytes"] - file_size)
-            self._record_success(account_idx)
-            return True
-        except Exception as e:
-            logger.warning(f"删除 {key} 失败: {e}")
-            self._record_failure(account_idx, e)
-            return False
+                logger.warning(f"删除 {key} 从账号{idx} 失败: {e}")
+                self._record_failure(idx, e)
+        return deleted
 
 
     # ==================== 兼容方法（哈希分散到数据账号）====================
@@ -522,7 +548,10 @@ class S3Pool:
                         return idx, account
                 except Exception as e:
                     self._record_failure(account, e)
-                    # 不重新选桶（设计意图：put和get必须在同一桶），继续用原桶重试
+                    # 重试时重新选账号（原账号可能已 degraded/unavailable，fallback）
+                    account = self._select_account(chunk_key)
+                    if account is None:
+                        break
             return idx, None
 
         workers = _dynamic_concurrency(file_size)
