@@ -7,10 +7,12 @@ ProcessManager 门面（重构版）
 - list_processes()从scan_configs()+PID文件读取
 - restore_all()从scan_configs()读取
 - snapshot()从pbackup.snapshot()读取（pbackup已从scan_configs()读取）
+- restore_all()隧道启动并行化（ThreadPoolExecutor）
 """
 import os
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import config
 import log
@@ -67,9 +69,12 @@ class ProcessManager:
             return None
 
     def restore_all(self):
-        """恢复进程 — 全量备份已包含所有项目文件，不需要单独下载进程快照"""
+        """恢复进程 — 全量备份已包含所有项目文件，不需要单独下载进程快照
+
+        优化：隧道启动并行化（ThreadPoolExecutor），减少恢复时间。
+        """
         restored, failed = prestore.restore_all()
-        # 从scan_configs()填充known字典 + 启动隧道
+        # 先填充known字典（锁内，快速）
         configs = pconfig.scan_configs()
         with self._lock:
             for name, cfg in configs.items():
@@ -80,7 +85,22 @@ class ProcessManager:
                 }
                 if pid:
                     self.known[name]["pid"] = pid
-                tunnels.start_tunnels(cfg, self.known[name], name)
+        # 并行启动所有隧道（锁外，不阻塞其他操作）
+        def _start_tunnels_for(name):
+            cfg = configs[name]
+            with self._lock:
+                entry = self.known.get(name, {})
+            try:
+                tunnels.start_tunnels(cfg, entry, name)
+            except Exception as e:
+                logger.error(f"{name} 隧道启动失败: {e}")
+
+        if configs:
+            t0 = time.time()
+            workers = min(len(configs), 10)
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                list(executor.map(_start_tunnels_for, configs.keys()))
+            logger.info(f"隧道并行启动完成 ({len(configs)}个, {time.time()-t0:.1f}s)")
         return restored, failed
 
     def start(self, name):
