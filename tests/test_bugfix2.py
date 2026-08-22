@@ -109,14 +109,13 @@ class TestBug4TerminalEncoding:
 
 class TestBug5ZstdDetection:
     def test_has_zstd(self):
+        """restore_files_from_file has zstd header detection"""
         src = _src("worker/persistence.py")
-        idx = src.find("def restore_files_from_bytes")
+        idx = src.find("def restore_files_from_file")
         assert idx >= 0
-        func_body = src[idx:src.find("def ", idx + 10)]
-        assert "\\x28" in func_body
+        func_body = src[idx:src.find("def save_prev_backup")]
+        assert "x28" in func_body
         assert "--zstd" in func_body
-
-
 class TestBug6AutoUpdate:
     def test_dispatch_status_check(self):
         src = _src("manager/app.py")

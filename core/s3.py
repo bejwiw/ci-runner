@@ -512,15 +512,20 @@ class S3Pool:
 
     # ==================== 分片存储（大文件）====================
     def put_file(self, key, file_path):
-        """从磁盘文件上传。>=50MB分片并发，<50MB直接上传。"""
+        """从磁盘文件上传。纯单文件put（不分片）。
+
+        超过S3_UPLOAD_LIMIT的文件返回False（调用方走Release降级）。
+        旧分片数据通过get_to_file兼容下载（先查单文件，无则查manifest走分片）。
+        """
         if not self._initialized:
             return False
         file_size = os.path.getsize(file_path)
-        if file_size < LARGE_FILE_THRESHOLD:
-            with open(file_path, "rb") as f:
-                data = f.read()
-            return self.put(key, data)
-        return self._put_file_chunked(key, file_path, file_size)
+        if file_size > S3_UPLOAD_LIMIT:
+            logger.warning(f"文件 {file_size/1048576:.0f}MB 超过S3上限{S3_UPLOAD_LIMIT/1048576:.0f}MB，跳过S3")
+            return False
+        with open(file_path, "rb") as f:
+            data = f.read()
+        return self.put(key, data)
 
     def _put_file_chunked(self, key, file_path, file_size):
         """分片并发上传大文件"""

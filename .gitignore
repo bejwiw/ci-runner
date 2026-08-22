@@ -19,3 +19,4 @@ venv/
 # 临时脚本不入库（本地保留）
 scripts/
 .bugfix-backup/
+gh-accounts-tokens.json
